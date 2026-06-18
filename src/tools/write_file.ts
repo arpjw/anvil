@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { shadowWrite, commitToReal, formatDiagnostics } from '../shadow/workspace.js';
+import { uiStream } from '../ui/stream.js';
 
 // Per-session, per-file retry counter. Tracks how many times write_file has
 // been called for a given file without clean diagnostics, so we can escalate
@@ -20,6 +21,8 @@ export async function writeFile(
   const attempt = (retryCounters.get(retryKey) ?? 0) + 1;
   retryCounters.set(retryKey, attempt);
 
+  uiStream.push({ type: 'shadow_attempt', file: fullPath, attempt, maxAttempts: MAX_RETRIES });
+
   let result;
   try {
     mkdirSync(dirname(fullPath), { recursive: true });
@@ -31,18 +34,22 @@ export async function writeFile(
   if (result.clean) {
     retryCounters.delete(retryKey);
     await commitToReal(sessionId, fullPath);
+    uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: 0, outcome: 'committed' });
+    uiStream.push({ type: 'file_modified', path: fullPath });
     const tag = attempt > 1 ? ` (self-corrected on attempt ${attempt})` : '';
     return `Wrote ${fullPath}${tag}`;
   }
 
   if (attempt >= MAX_RETRIES) {
     retryCounters.delete(retryKey);
+    uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: result.diagnostics.length, outcome: 'escalated' });
     return (
       `ESCALATION: ${path} still has TypeScript errors after ${MAX_RETRIES} attempts. ` +
       `Manual intervention required.\n\nErrors:\n${formatDiagnostics(result.diagnostics)}`
     );
   }
 
+  uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: result.diagnostics.length, outcome: 'retry' });
   return (
     `TypeScript errors in ${path} (attempt ${attempt}/${MAX_RETRIES}). ` +
     `Fix the errors below and call write_file again with the corrected content:\n\n` +

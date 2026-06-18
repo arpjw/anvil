@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
 import type { Plan } from './planner.js';
+import { uiStream } from '../ui/stream.js';
 
 export interface ExecutorReport {
   success: boolean;
@@ -51,8 +52,6 @@ export async function runExecutor(
   ];
 
   const escalations: string[] = [];
-
-  process.stderr.write('\n[Executor] Executing approved plan...\n');
 
   await runStreamingLoop(client, messages, executorTools, async (name, args) => {
     if (name === 'read_file' && hasRestriction) {

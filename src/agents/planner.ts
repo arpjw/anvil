@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
+import { uiStream } from '../ui/stream.js';
 
 export interface Plan {
   goal: string;
@@ -107,7 +108,7 @@ export async function runPlanner(
   const planPath = join(planDir, 'plan.json');
   let planWritten = false;
 
-  process.stderr.write('\n[Planner] Exploring codebase...\n');
+  uiStream.push({ type: 'phase', phase: 'planning' });
 
   await runStreamingLoop(client, messages, plannerTools, async (name, args) => {
     if (name === 'write_plan') {
@@ -124,6 +125,5 @@ export async function runPlanner(
     throw new Error('[Planner] write_plan was never called — no plan was produced');
   }
 
-  process.stderr.write(`[Planner] Plan written → ${planPath}\n`);
   return planPath;
 }

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { uiStream } from '../ui/stream.js';
 
 export type ToolExecutorFn = (
   name: string,
@@ -36,10 +37,7 @@ export async function runStreamingLoop(
       const delta = choice.delta;
       finishReason = choice.finish_reason ?? finishReason;
 
-      if (delta.content) {
-        process.stdout.write(delta.content);
-        textContent += delta.content;
-      }
+      if (delta.content) textContent += delta.content;
 
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
@@ -52,7 +50,7 @@ export async function runStreamingLoop(
       }
     }
 
-    if (textContent) process.stdout.write('\n');
+    if (textContent) uiStream.push({ type: 'model_text', text: textContent });
 
     const toolCalls = Object.values(toolCallMap);
     if (toolCalls.length === 0 || finishReason === 'stop') break;
@@ -69,18 +67,19 @@ export async function runStreamingLoop(
 
     for (const tc of toolCalls) {
       let args: Record<string, unknown> = {};
-      try { args = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* malformed args */ }
+      try { args = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* malformed */ }
 
       if (tc.name === 'done') {
-        process.stdout.write(`\n[Anvil] Done: ${(args.summary as string) ?? ''}\n`);
+        const summary = (args.summary as string) ?? '';
+        uiStream.push({ type: 'done', summary });
         break outer;
       }
 
-      process.stderr.write(`  [${tc.name}] ${describeArgs(tc.arguments)}\n`);
+      uiStream.push({ type: 'tool_call', name: tc.name, args: describeArgs(tc.arguments) });
 
       const { result, done } = await executeToolFn(tc.name, args);
       const preview = result.length > 120 ? result.slice(0, 120) + '...' : result;
-      process.stderr.write(`  → ${preview}\n`);
+      uiStream.push({ type: 'tool_result', name: tc.name, preview });
 
       messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
 
@@ -89,7 +88,7 @@ export async function runStreamingLoop(
   }
 
   if (iterations >= maxIterations) {
-    process.stderr.write('\nReached max iterations limit.\n');
+    uiStream.push({ type: 'error', message: 'Reached max iterations limit.' });
   }
 }
 
@@ -98,7 +97,7 @@ export function describeArgs(raw: string): string {
     const args = JSON.parse(raw) as Record<string, unknown>;
     return Object.entries(args)
       .map(([k, v]) => {
-        const val = typeof v === 'string' && v.length > 60 ? v.slice(0, 60) + '…' : String(v);
+        const val = typeof v === 'string' && v.length > 50 ? v.slice(0, 50) + '…' : String(v);
         return `${k}=${val}`;
       })
       .join(', ');

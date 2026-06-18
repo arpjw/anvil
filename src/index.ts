@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import React from 'react';
+import { render } from 'ink';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
 import { runAgent } from './agent.js';
+import { App } from './ui/App.js';
+import { uiStream } from './ui/stream.js';
 
 const [, , request, workdirArg] = process.argv;
 
@@ -16,13 +20,17 @@ if (!request || request === '--help' || request === '-h') {
 const workdir = resolve(workdirArg ?? process.cwd());
 const sessionId = randomUUID();
 
-process.stderr.write(`Anvil — ${workdir}\n`);
-process.stderr.write(`Session: ${sessionId}\n`);
-process.stderr.write(`Request: ${request}\n\n`);
+const { unmount } = render(
+  React.createElement(App, { request, workdir, sessionId }),
+);
 
-runAgent(request, workdir, sessionId).then(() => {
-  process.exit(0);
-}).catch(err => {
-  process.stderr.write(`\nError: ${(err as Error).message}\n`);
-  process.exit(1);
-});
+runAgent(request, workdir, sessionId)
+  .then(() => {
+    uiStream.ensureDone();
+    // Small delay so the UI can render the final done state before exit.
+    setTimeout(() => { unmount(); process.exit(0); }, 500);
+  })
+  .catch((err: Error) => {
+    uiStream.push({ type: 'error', message: err.message });
+    setTimeout(() => { unmount(); process.exit(1); }, 500);
+  });
