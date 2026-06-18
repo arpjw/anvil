@@ -8,7 +8,7 @@ if (!request || request === '--help' || request === '-h') {
   console.error('Usage: anvil "<request>" [workdir]');
   console.error('       workdir defaults to the current directory');
   console.error('\nExample: anvil "add error handling to main.ts"');
-  console.error('\nEnv: MOONSHOT_API_KEY must be set');
+  console.error('\nEnv: ANTHROPIC_API_KEY must be set');
   process.exit(1);
 }
 

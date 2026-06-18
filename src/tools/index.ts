@@ -3,6 +3,8 @@ import { readFile } from './read_file.js';
 import { listFiles } from './list_files.js';
 import { textSearch } from './text_search.js';
 import { writeFile } from './write_file.js';
+import { astSearch } from './ast_search.js';
+import { findSymbol } from './find_symbol.js';
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -69,6 +71,66 @@ export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'ast_search',
+      description:
+        'Query the AST of source files to find structural elements without reading full file contents. ' +
+        'Use this before read_file to locate specific constructs. ' +
+        'Returns each match with its name and exact line range. ' +
+        'Supports TypeScript, JavaScript, and Python.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query_type: {
+            type: 'string',
+            enum: ['functions', 'classes', 'imports', 'interfaces', 'types'],
+            description:
+              'What to look for: ' +
+              '"functions" = function/method/arrow-function declarations, ' +
+              '"classes" = class declarations, ' +
+              '"imports" = import statements, ' +
+              '"interfaces" = TypeScript interface declarations, ' +
+              '"types" = TypeScript type alias declarations',
+          },
+          path: {
+            type: 'string',
+            description: 'File or directory to search (relative to working directory)',
+          },
+          file_pattern: {
+            type: 'string',
+            description: 'Optional glob pattern to restrict to specific files, e.g. "*.ts"',
+          },
+        },
+        required: ['query_type', 'path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'find_symbol',
+      description:
+        'Use the TypeScript language server to find the definition site and all references to a symbol. ' +
+        'Far more precise than grep: resolves through imports and type aliases. ' +
+        'Use this when you need to understand where a function/type/variable is defined and everywhere it is used.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: {
+            type: 'string',
+            description: 'The symbol name to look up (function name, class name, variable, type, etc.)',
+          },
+          file: {
+            type: 'string',
+            description: 'A file where the symbol is known to appear (relative to working directory)',
+          },
+        },
+        required: ['symbol', 'file'],
+      },
+    },
+  },
 ];
 
 export async function executeTool(
@@ -94,6 +156,15 @@ export async function executeTool(
       });
     case 'write_file':
       return writeFile(args.path as string, args.content as string, workdir);
+    case 'ast_search':
+      return astSearch(
+        args.query_type as 'functions' | 'classes' | 'imports' | 'interfaces' | 'types',
+        args.path as string,
+        workdir,
+        args.file_pattern as string | undefined,
+      );
+    case 'find_symbol':
+      return findSymbol(args.symbol as string, args.file as string, workdir);
     default:
       return `Unknown tool: ${name}`;
   }
