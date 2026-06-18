@@ -110,6 +110,23 @@ export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'done',
+      description: 'Call this when the task is fully complete. Provide a concise summary of every change made.',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: {
+            type: 'string',
+            description: 'What was accomplished — files changed, what changed, any notable decisions.',
+          },
+        },
+        required: ['summary'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'find_symbol',
       description:
         'Use the TypeScript language server to find the definition site and all references to a symbol. ' +

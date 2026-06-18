@@ -1,5 +1,12 @@
 const API_BASE = 'https://api.example.com';
 
+/**
+ * Fetches a user by their ID from the API.
+ *
+ * @param id - The unique numeric identifier of the user to retrieve.
+ * @returns A promise that resolves to the user data returned by the API.
+ * @throws An error if the HTTP response is not OK or if the request fails.
+ */
 async function fetchUser(id: number) {
   try {
     const response = await fetch(`${API_BASE}/users/${id}`);

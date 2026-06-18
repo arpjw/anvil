@@ -20,7 +20,9 @@ process.stderr.write(`Anvil — ${workdir}\n`);
 process.stderr.write(`Session: ${sessionId}\n`);
 process.stderr.write(`Request: ${request}\n\n`);
 
-runAgent(request, workdir, sessionId).catch(err => {
+runAgent(request, workdir, sessionId).then(() => {
+  process.exit(0);
+}).catch(err => {
   process.stderr.write(`\nError: ${(err as Error).message}\n`);
   process.exit(1);
 });

@@ -1,11 +1,11 @@
 // Shared domain types used across the entire service
 
-export type UserId = string;
+export type AccountId = string;
 export type ProductId = string;
 export type OrderId = string;
 
-export interface User {
-  id: UserId;
+export interface Account {
+  id: AccountId;
   email: string;
   name: string;
   role: 'admin' | 'customer';
@@ -22,7 +22,7 @@ export interface Product {
 
 export interface Order {
   id: OrderId;
-  userId: UserId;
+  userId: AccountId;
   items: OrderItem[];
   status: OrderStatus;
   placedAt: Date;

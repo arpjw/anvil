@@ -1,14 +1,14 @@
 // Entry point — wires everything together and runs a demo scenario
 
-import { createUser, createProduct } from './db.js';
+import { createAccount, createProduct } from './db.js';
 import { login, logout } from './auth.js';
 import { placeOrder, cancelOrder, getUserOrders } from './orders.js';
 import { centsToDisplay, formatDate } from './utils.js';
 
 function demo(): void {
   // Seed some data
-  const alice = createUser({ email: 'alice@example.com', name: 'Alice', role: 'admin' });
-  const bob   = createUser({ email: 'bob@example.com',   name: 'Bob',   role: 'customer' });
+  const alice = createAccount({ email: 'alice@example.com', name: 'Alice', role: 'admin' });
+  const bob   = createAccount({ email: 'bob@example.com',   name: 'Bob',   role: 'customer' });
 
   const widget = createProduct({ name: 'Widget', priceInCents: 999,  stock: 100, tags: ['hardware'] });
   const gadget = createProduct({ name: 'Gadget', priceInCents: 2499, stock: 5,   tags: ['electronics'] });
