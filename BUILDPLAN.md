@@ -78,13 +78,13 @@
 
 **Done when:** A non-technical person watching over your shoulder understands what's happening at every moment.
 
-- [ ] Integrate Ink (React for CLIs) or Blessed for TUI
-- [ ] Session list panel (left) + chat/log panel (right)
-- [ ] Inline tool call display: show active tool, args, result summary
-- [ ] Shadow workspace cycle display: "validating... 2 errors... retrying... clean ✓"
+- [x] Integrate Ink (React for CLIs) or Blessed for TUI
+- [x] Session list panel (left) + chat/log panel (right)
+- [x] Inline tool call display: show active tool, args, result summary
+- [x] Shadow workspace cycle display: "validating... 2 errors... retrying... clean ✓"
 - [ ] SQLite session persistence: save/resume sessions
 - [ ] Config file: model selection, LSP binary paths, project root
-- [ ] Write Session 5 log entry
+- [x] Write Session 5 log entry
 
 ---
 

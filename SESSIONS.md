@@ -32,6 +32,48 @@
 
 <!-- Entries go below, newest at top -->
 
+## Session 5 — June 18, 2026
+**Phase:** 5 — TUI + Polish
+**Duration:** ~1h
+
+### What was accomplished
+- Installed ink@6, react@19, chalk@5, figlet — established UI dep stack
+- src/ui/stream.ts: global UIStream (EventEmitter) with typed UIEvent union; agents push events in, UI reacts; waitForApproval/resolveApproval replace readline for the plan approval gate; ensureDone() prevents double-emission
+- src/ui/App.tsx: root Ink component — figlet 'Small' font ANVIL header, 28%/72% two-panel layout via Box width="28%"/flexGrow, live activity log with last-18 items, plan display + y/n/[r]evise approval prompt with inline text input, useInput gated on isRawModeSupported
+- src/ui/components/ToolCall.tsx: amber tool name (#E8A020 via chalk), inline spinner (BRAILLE frames, 80ms), truncated args, result preview on second line
+- src/ui/components/ShadowCycle.tsx: shadow[attempt/max] filename validating…/✓ committed/✖ N errors → retrying/✖ escalated
+- src/ui/components/PlanDisplay.tsx: round-border yellow box, all 7 fields with bold section headers
+- src/ui/components/StatusBar.tsx: full-width bottom bar — model, phase (colored), elapsed seconds via setInterval
+- All agents stripped of process.stdout/stderr writes; emit typed UIEvents instead
+- write_file.ts emits shadow_attempt, shadow_result (committed/retry/escalated), file_modified
+- orchestrator.ts: readline removed; waitForApproval() replaces prompt(); plan_ready emitted before waiting for response
+- index.ts: render(React.createElement(App, props)) then runAgent; unmount + exit(0) after 500ms delay so done state is visible
+- Verified: UI renders header + two panels + status bar; phase transitions (IDLE→EXECUTING→ERROR) visible; 401 error appears in activity log in red
+
+### Decisions made
+- Event stream decouples agents from UI completely — agents never call process.stdout/stderr; all output goes through typed UIEvent union
+- waitForApproval/resolveApproval two-way bridge: orchestrator awaits a Promise, App.tsx resolves it via useInput. No readline in scope when Ink owns stdin
+- useInput gated on isRawModeSupported — prevents crash when stdin is a pipe (e.g. background test); in a real terminal raw mode is always available
+- Keys on displayItems: map with <Box key={item.id}> wrapper rather than setting key on renderItem return value — avoids React key warning with function-call style renderers
+- Executor no longer emits phase event (orchestrator always sets it first); removing the duplicate prevents "── executing ──" appearing twice in the log
+
+### What broke / was surprising
+- npm install required --legacy-peer-deps (peer dep conflict between ink@6 and react@19 vs other packages)
+- Ink 6 + React 19 installed (not 4.x as initially planned) — API is identical; percentage width strings work fine with yoga-layout
+- useInput throws "Raw mode not supported" when stdin is a pipe — not a terminal bug, fixed with { isActive: isRawModeSupported } option
+- SQLite session persistence and config file remain as the only unchecked Phase 5 items; deferred to next session
+
+### State of codebase at close
+- src/ui/ complete: stream.ts + App.tsx + 4 components, all type-clean
+- All 5 phases (skeleton → context → shadow workspace → subagent split → TUI) working in sequence
+- Zero TypeScript errors (tsc --noEmit clean)
+- Ink renders: figlet header, two panels, colored phase transitions, shadow cycles, approval gate, done summary
+
+### Next session should start with
+- Phase 6: Writeup (or optionally finish SQLite persistence + config file first)
+- Section 1: Why naive coding agents fail — pull specific failure examples from shadow.log
+- Section 2: Shadow workspace implementation — filesystem vs editor-level comparison
+
 ## Session 4 — June 18, 2026
 **Phase:** 4 — Subagent Split
 **Duration:** ~1h
