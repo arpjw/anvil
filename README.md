@@ -11,28 +11,22 @@ The project was built to understand the architectural decisions that make Cursor
 ## Architecture
 
 ```
-User Request
-     │
-     ▼
-┌─────────────────────┐
-│     Orchestrator    │  main agent loop, global state, todo list
-└────────┬────────────┘
-         │ spawns
-    ┌────┴──────┐
-    ▼           ▼
-┌────────┐  ┌──────────┐
-│Planner │  │ Executor │
-└───┬────┘  └────┬─────┘
-    │             │ writes to shadow first
-    ▼             ▼
-┌──────────────────────┐
-│   Shadow Workspace   │  temp copy → LSP diagnostics → commit or retry
-└──────────┬───────────┘
-           │ tools
-           ▼
-┌──────────────────────┐
-│   Context Engine     │  read_file, list_files, text_search, find_symbol, ast_search
-└──────────────────────┘
+┌─────────────────────────────────────────────┐
+│                    TUI                      │
+│          Ink · event stream · React         │
+├─────────────────────────────────────────────┤
+│                 Orchestrator                │
+│      complexity classifier · todo list      │
+├──────────────────────┬──────────────────────┤
+│       Planner        │       Executor       │
+│   read-only tools    │   shadow-mediated    │
+├──────────────────────┴──────────────────────┤
+│              Shadow Workspace               │
+│       propose → LSP validate → commit       │
+├─────────────────────────────────────────────┤
+│              Context Engine                 │
+│  read_file · ast_search · find_symbol · ... │
+└─────────────────────────────────────────────┘
 ```
 
 **Context Engine** (`src/tools/`, `src/treesitter/`, `src/lsp/`) — the retrieval layer, called by both the Planner and the Orchestrator. Key decision: the LSP client is a module-level singleton per working directory, so the language server is initialized once with full project context and reused across all tool calls in a session.
