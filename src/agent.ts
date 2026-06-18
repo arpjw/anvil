@@ -9,13 +9,13 @@ const SYSTEM_PROMPT = `You are Anvil, a precise coding agent. Given a natural la
 Be surgical. Read before you write. When writing, always include the full file content.`;
 
 export async function runAgent(request: string, workdir: string): Promise<void> {
-  if (!process.env.MOONSHOT_API_KEY) {
-    throw new Error('MOONSHOT_API_KEY environment variable is not set');
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is not set');
   }
 
   const client = new OpenAI({
-    baseURL: 'https://api.moonshot.cn/v1',
-    apiKey: process.env.MOONSHOT_API_KEY,
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    baseURL: "https://api.anthropic.com/v1",
   });
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -30,7 +30,7 @@ export async function runAgent(request: string, workdir: string): Promise<void> 
     iterations++;
 
     const stream = await client.chat.completions.create({
-      model: 'moonshot-v1-32k',
+      model: "claude-sonnet-4-6",
       messages,
       tools: toolDefinitions,
       tool_choice: 'auto',
