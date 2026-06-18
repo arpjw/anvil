@@ -51,13 +51,13 @@
 - Auto mkdir in write_file — agent shouldn't have to think about directory existence
 
 ### What broke / was surprising
-- Nothing structural broke — end-to-end run pending API key
+- Nothing structural broke — end-to-end run confirmed clean with MOONSHOT_API_KEY
 
 ### State of codebase at close
-- All Phase 1 tasks complete except live end-to-end verification (needs MOONSHOT_API_KEY)
+- All Phase 1 tasks complete including live end-to-end verification
+- Agent correctly added error handling to test-repo/main.ts fetch calls
 - src/tools/ clean and modular, agent loop solid, CLI works
-- test-repo/main.ts ready as test target
 
 ### Next session should start with
-- Set MOONSHOT_API_KEY and run the end-to-end test, confirm agent adds try/catch to both fetch calls
-- Then move to Phase 2: tree-sitter integration for ast_search
+- Move to Phase 2: tree-sitter integration for ast_search
+- Integrate typescript-language-server for find_symbol and get_diagnostics

@@ -16,8 +16,8 @@
 - [x] Implement `text_search` tool (ripgrep subprocess via execa)
 - [x] Wire Kimi/Moonshot API (OpenAI-compatible) tool-use loop with streaming
 - [x] Basic CLI entrypoint: `anvil "<request>" [workdir]`
-- [ ] Make a real file edit end-to-end on a test repo
-- [ ] Write Session 1 log entry
+- [x] Make a real file edit end-to-end on a test repo
+- [x] Write Session 1 log entry
 
 ---
 
