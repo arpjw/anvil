@@ -26,16 +26,16 @@
 
 **Done when:** Given a medium codebase and a natural language request, the agent finds the right files without being told where to look.
 
-- [ ] Integrate tree-sitter (TypeScript + Go + Python grammars)
-- [ ] Implement `ast_search`: query by node type, extract function signatures, find imports
-- [ ] Spawn LSP subprocess (`typescript-language-server`)
-- [ ] Implement `find_symbol`: definition lookup + references via LSP
-- [ ] Implement `get_diagnostics` via LSP
-- [ ] Set up sqlite-vec for vector index
-- [ ] Chunk files and embed on project init
-- [ ] Implement semantic search tool over vector index
-- [ ] Benchmark: 10k line repo, 5 test queries, measure tool calls to find correct file
-- [ ] Write Session 2 log entry
+- [x] Integrate tree-sitter (TypeScript + Go + Python grammars)
+- [x] Implement `ast_search`: query by node type, extract function signatures, find imports
+- [x] Spawn LSP subprocess (`typescript-language-server`)
+- [x] Implement `find_symbol`: definition lookup + references via LSP
+- [x] Implement `get_diagnostics` via LSP
+- [x] Set up sqlite-vec for vector index
+- [x] Chunk files and embed on project init
+- [x] Implement semantic search tool over vector index
+- [x] Benchmark: 10k line repo, 5 test queries, measure tool calls to find correct file
+- [x] Write Session 2 log entry
 
 ---
 
