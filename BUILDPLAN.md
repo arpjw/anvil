@@ -44,15 +44,15 @@
 
 **Done when:** An intentionally broken edit is proposed, rejected by shadow workspace, self-corrected, and committed — all automatically.
 
-- [ ] Shadow copy mechanism: mirror target file to `/tmp/anvil/<sessionId>/shadow/`
-- [ ] Apply edit to shadow copy only
-- [ ] Run LSP diagnostics against shadow copy
-- [ ] Return diagnostics to agent for self-correction
-- [ ] Retry loop: max 3 passes per file, escalate on failure
-- [ ] Commit to real file only on clean diagnostics
-- [ ] Session log: write every shadow cycle to `shadow.log`
-- [ ] Test: intentionally broken edit → shadow rejects → agent fixes → commits
-- [ ] Write Session 3 log entry
+- [x] Shadow copy mechanism: mirror target file to `/tmp/anvil/<sessionId>/shadow/`
+- [x] Apply edit to shadow copy only
+- [x] Run LSP diagnostics against shadow copy
+- [x] Return diagnostics to agent for self-correction
+- [x] Retry loop: max 3 passes per file, escalate on failure
+- [x] Commit to real file only on clean diagnostics
+- [x] Session log: write every shadow cycle to `shadow.log`
+- [x] Test: intentionally broken edit → shadow rejects → agent fixes → commits
+- [x] Write Session 3 log entry
 
 ---
 

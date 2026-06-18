@@ -13,7 +13,7 @@ const SYSTEM_PROMPT = `You are Anvil, a precise coding agent. Given a natural la
 Prefer ast_search over read_file for discovery. Prefer find_symbol over text_search for symbol resolution.
 Be surgical. Read before you write.`;
 
-export async function runAgent(request: string, workdir: string): Promise<void> {
+export async function runAgent(request: string, workdir: string, sessionId: string): Promise<void> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY environment variable is not set');
   }
@@ -101,7 +101,7 @@ export async function runAgent(request: string, workdir: string): Promise<void> 
         // malformed args — pass empty
       }
 
-      const result = await executeTool(tc.name, args, workdir);
+      const result = await executeTool(tc.name, args, workdir, sessionId);
 
       const preview = result.length > 120 ? result.slice(0, 120) + '...' : result;
       process.stderr.write(`  → ${preview}\n`);

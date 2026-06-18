@@ -32,6 +32,39 @@
 
 <!-- Entries go below, newest at top -->
 
+## Session 3 — June 18, 2026
+**Phase:** 3 — Shadow Workspace
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/shadow/workspace.ts: shadowWrite, commitToReal, clearSession
+- Extended LSP client with diagnostics support: publishDiagnostics listener, checkContent, revertContent
+- write_file.ts now thin — all shadow logic in src/shadow/
+- sessionId threaded from crypto.randomUUID() at CLI startup through all tool calls
+- shadow.log: JSON entry per cycle (timestamp, proposed content excerpt, diagnostics, outcome)
+- Test proves full cycle: broken edit rejected → diagnostics returned → agent self-corrects → commits clean
+
+### Decisions made
+- LSP-in-memory approach (didChange) rather than actual temp file copy — avoids file system race conditions
+- 400ms debounce + 8s global timeout for diagnostics to settle
+- Max 3 retry passes per file before escalating to orchestrator
+
+### What broke / was surprising
+- Critical fix: textDocument/publishDiagnostics must be declared in initialize capabilities
+  or typescript-language-server never sends diagnostic push notifications. Silent failure.
+
+### State of codebase at close
+- Full shadow workspace pipeline working end-to-end
+- src/shadow/workspace.ts, src/lsp/client.ts extended, write_file.ts thinned
+- All three phases (skeleton, context engine, shadow workspace) working together
+
+### Next session should start with
+- Phase 4: Subagent split
+- Orchestrator → Planner (read-only) → Executor (writes via shadow workspace)
+- User approval gate between plan and execution
+
+---
+
 ## Session 2 — June 17, 2026
 **Phase:** 2 — Context Engine
 **Duration:** ~1h

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from 'path';
+import { randomUUID } from 'crypto';
 import { runAgent } from './agent.js';
 
 const [, , request, workdirArg] = process.argv;
@@ -13,11 +14,13 @@ if (!request || request === '--help' || request === '-h') {
 }
 
 const workdir = resolve(workdirArg ?? process.cwd());
+const sessionId = randomUUID();
 
 process.stderr.write(`Anvil — ${workdir}\n`);
+process.stderr.write(`Session: ${sessionId}\n`);
 process.stderr.write(`Request: ${request}\n\n`);
 
-runAgent(request, workdir).catch(err => {
+runAgent(request, workdir, sessionId).catch(err => {
   process.stderr.write(`\nError: ${(err as Error).message}\n`);
   process.exit(1);
 });

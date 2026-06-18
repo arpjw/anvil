@@ -32,6 +32,20 @@ export interface LspPosition {
   character: number; // 0-indexed
 }
 
+export interface LspDiagnostic {
+  file: string;       // absolute path
+  line: number;       // 1-indexed
+  character: number;  // 1-indexed
+  message: string;
+  severity: 'error' | 'warning' | 'info' | 'hint';
+}
+
+interface RawLspDiagnostic {
+  range: { start: LspPosition; end: LspPosition };
+  severity?: number; // 1=Error 2=Warning 3=Info 4=Hint
+  message: string;
+}
+
 // ---------------------------------------------------------------------------
 // LspClient
 // ---------------------------------------------------------------------------
@@ -44,6 +58,9 @@ export class LspClient {
   private openedDocs = new Set<string>();
   private _workdir = '';
   private _ready = false;
+  private diagnosticsMap = new Map<string, LspDiagnostic[]>();
+  private diagnosticsListeners = new Map<string, Array<(diags: LspDiagnostic[]) => void>>();
+  private docVersions = new Map<string, number>();
 
   get ready(): boolean { return this._ready && this.proc !== null; }
   get workdir(): string { return this._workdir; }
@@ -135,6 +152,115 @@ export class LspClient {
     this._ready = false;
   }
 
+  // Send proposed content to the LSP and collect the resulting diagnostics.
+  // Does NOT write to disk. Returns only error-severity items by default.
+  async checkContent(filePath: string, newContent: string, timeoutMs = 8000): Promise<LspDiagnostic[]> {
+    if (!this.ready) return [];
+    const uri = pathToFileURL(filePath).toString();
+
+    if (!this.openedDocs.has(uri)) {
+      // File may not exist on disk yet — open with a placeholder so the LSP
+      // registers the document, then we'll overwrite via didChange below.
+      const exists = (() => { try { readFileSync(filePath, 'utf-8'); return true; } catch { return false; } })();
+      if (exists) {
+        this.openDocument(filePath);
+      } else {
+        const ext = filePath.split('.').pop() ?? '';
+        const languageId = ext === 'py' ? 'python' : (ext === 'ts' || ext === 'tsx') ? 'typescript' : 'javascript';
+        this.notify('textDocument/didOpen', {
+          textDocument: { uri, languageId, version: 1, text: '' },
+        });
+        this.openedDocs.add(uri);
+        this.docVersions.set(uri, 1);
+      }
+      // Let the LSP settle before sending the change.
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    const version = (this.docVersions.get(uri) ?? 1) + 1;
+    this.docVersions.set(uri, version);
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version },
+      contentChanges: [{ text: newContent }],
+    });
+
+    return this.waitForDiagnosticsSettle(uri, timeoutMs);
+  }
+
+  // Reset the LSP's in-memory view of a file back to what is on disk.
+  async revertContent(filePath: string): Promise<void> {
+    if (!this.ready) return;
+    const uri = pathToFileURL(filePath).toString();
+    if (!this.openedDocs.has(uri)) return;
+    let text = '';
+    try { text = readFileSync(filePath, 'utf-8'); } catch { return; }
+    const version = (this.docVersions.get(uri) ?? 1) + 1;
+    this.docVersions.set(uri, version);
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version },
+      contentChanges: [{ text }],
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Diagnostics settle helper
+  // -------------------------------------------------------------------------
+
+  private waitForDiagnosticsSettle(uri: string, timeoutMs: number): Promise<LspDiagnostic[]> {
+    return new Promise(resolve => {
+      let latest: LspDiagnostic[] = [];
+      let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const globalTimer = setTimeout(() => {
+        cleanup();
+        resolve(latest);
+      }, timeoutMs);
+
+      const settle = () => {
+        clearTimeout(globalTimer);
+        cleanup();
+        resolve(latest);
+      };
+
+      const handler = (diags: LspDiagnostic[]) => {
+        latest = diags;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(settle, 400);
+      };
+
+      const cleanup = () => {
+        if (settleTimer) clearTimeout(settleTimer);
+        const ls = this.diagnosticsListeners.get(uri) ?? [];
+        const idx = ls.indexOf(handler);
+        if (idx >= 0) ls.splice(idx, 1);
+      };
+
+      const ls = this.diagnosticsListeners.get(uri) ?? [];
+      ls.push(handler);
+      this.diagnosticsListeners.set(uri, ls);
+    });
+  }
+
+  private handleNotification(msg: JsonRpcMessage): void {
+    if (msg.method !== 'textDocument/publishDiagnostics') return;
+    const p = msg.params as { uri: string; diagnostics: RawLspDiagnostic[] };
+    const diags = (p.diagnostics ?? []).map(d => this.normalizeDiagnostic(d, p.uri));
+    this.diagnosticsMap.set(p.uri, diags);
+    const ls = this.diagnosticsListeners.get(p.uri);
+    if (ls) for (const fn of ls) fn(diags);
+  }
+
+  private normalizeDiagnostic(raw: RawLspDiagnostic, uri: string): LspDiagnostic {
+    const sev = raw.severity ?? 1;
+    return {
+      file: fileURLToPath(uri),
+      line: raw.range.start.line + 1,
+      character: raw.range.start.character + 1,
+      message: raw.message,
+      severity: sev === 1 ? 'error' : sev === 2 ? 'warning' : sev === 3 ? 'info' : 'hint',
+    };
+  }
+
   // -------------------------------------------------------------------------
   // LSP initialize handshake
   // -------------------------------------------------------------------------
@@ -147,7 +273,17 @@ export class LspClient {
       rootUri,
       capabilities: {
         textDocument: {
-          synchronization: { dynamicRegistration: false, didOpen: true },
+          synchronization: {
+            dynamicRegistration: false,
+            didOpen: true,
+            didChange: 1, // TextDocumentSyncKind.Full
+          },
+          publishDiagnostics: {
+            relatedInformation: true,
+            tagSupport: { valueSet: [1, 2] },
+            versionSupport: false,
+            codeDescriptionSupport: true,
+          },
           definition: { dynamicRegistration: false, linkSupport: false },
           references: { dynamicRegistration: false },
         },
@@ -181,7 +317,7 @@ export class LspClient {
       try {
         const msg = JSON.parse(body) as JsonRpcMessage;
         if (msg.id != null) this.dispatch(msg);
-        // Notifications (no id) are silently ignored
+        else this.handleNotification(msg);
       } catch { /* malformed — drop */ }
     }
   }

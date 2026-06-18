@@ -137,6 +137,7 @@ export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   workdir: string,
+  sessionId: string,
 ): Promise<string> {
   switch (name) {
     case 'read_file':
@@ -155,7 +156,7 @@ export async function executeTool(
         maxResults: args.max_results as number | undefined,
       });
     case 'write_file':
-      return writeFile(args.path as string, args.content as string, workdir);
+      return writeFile(args.path as string, args.content as string, workdir, sessionId);
     case 'ast_search':
       return astSearch(
         args.query_type as 'functions' | 'classes' | 'imports' | 'interfaces' | 'types',
