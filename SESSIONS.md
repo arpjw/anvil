@@ -32,6 +32,42 @@
 
 <!-- Entries go below, newest at top -->
 
+## Session 4 — June 18, 2026
+**Phase:** 4 — Subagent Split
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/agents/loop.ts: shared streaming tool-use loop extracted from agent.ts (DRY base for all subagents)
+- Built src/agents/planner.ts: Planner subagent with all read-only tools + write_plan terminal tool; produces plan.json to /tmp/anvil/<sessionId>/plan.json
+- Built src/agents/executor.ts: Executor subagent restricted to read_file/write_file/done; enforces allowedSet path restriction from plan's filesToModify+filesToCreate
+- Built src/agents/orchestrator.ts: routes simple vs complex via keyword/file-path heuristic; displays plan, runs y/n/revise approval loop; reports escalations
+- Added done tool to src/tools/index.ts; loop.ts breaks outer loop immediately on done
+- Thinned src/agent.ts to a one-liner delegating to runOrchestrator
+- Added process.exit(0) to src/index.ts — prevents hang after executor completes
+- Full pipeline verified: Orchestrator → Planner (read-only exploration) → plan displayed → user approves → Executor (scoped writes through shadow workspace) → committed
+
+### Decisions made
+- Complexity heuristic is keyword-based + distinct file path count (≥2) — cheap, good enough, revisable
+- Executor path restriction uses resolved absolute paths in a Set for O(1) deny-fast access checks
+- done tool handled in loop.ts, not by executeTool — keeps tool routing clean, signals "break outer"
+- Promise.all scaffold around runPlanner for future concurrent exploration tasks already wired in
+- Simple requests bypass the planner entirely with an auto-generated minimal plan — avoids approval gate overhead for trivial edits
+
+### What broke / was surprising
+- process.exit(0) was required — without it the process hung after executor finished (async LSP subprocess kept event loop alive)
+- Executor must use resolve(workdir, path) to normalize relative paths before checking allowedSet, or paths with ./ prefix silently bypass the restriction
+
+### State of codebase at close
+- src/agents/ (loop.ts, planner.ts, executor.ts, orchestrator.ts) all built and verified
+- Full Orchestrator → Planner → Executor → Shadow Workspace → Commit pipeline working end-to-end
+- All four phases (skeleton, context engine, shadow workspace, subagent split) working together
+
+### Next session should start with
+- Phase 5: TUI + Polish
+- Integrate Ink (React for CLIs) or Blessed
+- Session list panel, inline tool call display, shadow workspace cycle visualization
+- SQLite session persistence
+
 ## Session 3 — June 18, 2026
 **Phase:** 3 — Shadow Workspace
 **Duration:** ~1h

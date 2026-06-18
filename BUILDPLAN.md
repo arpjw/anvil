@@ -61,15 +61,15 @@
 
 **Done when:** A complex multi-file request flows through Orchestrator → Planner (user approves plan) → Executor → Shadow Workspace → committed edits.
 
-- [ ] Define subagent interface and message passing protocol
-- [ ] Implement Planner subagent (read-only tools only)
-- [ ] Implement plan format (`plan.json` with all 7 fields)
-- [ ] Implement Executor subagent (write tools + shadow workspace, scoped reads)
-- [ ] Implement Orchestrator: spawn/coordinate subagents, own todo list
-- [ ] User approval gate: show plan, wait for approve/revise
-- [ ] Concurrent subagent support (`Promise.all` for independent queries)
-- [ ] Test: multi-file refactor flows correctly through all three agents
-- [ ] Write Session 4 log entry
+- [x] Define subagent interface and message passing protocol
+- [x] Implement Planner subagent (read-only tools only)
+- [x] Implement plan format (`plan.json` with all 7 fields)
+- [x] Implement Executor subagent (write tools + shadow workspace, scoped reads)
+- [x] Implement Orchestrator: spawn/coordinate subagents, own todo list
+- [x] User approval gate: show plan, wait for approve/revise
+- [x] Concurrent subagent support (`Promise.all` for independent queries)
+- [x] Test: multi-file refactor flows correctly through all three agents
+- [x] Write Session 4 log entry
 
 ---
 
