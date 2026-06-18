@@ -10,12 +10,12 @@
 
 **Done when:** Running `anvil "add error handling to main.ts"` on a real repo makes a correct edit.
 
-- [ ] Initialize TypeScript project (`tsconfig`, `package.json`, `eslint`)
-- [ ] Implement `read_file` tool
-- [ ] Implement `list_files` tool
-- [ ] Implement `text_search` tool (ripgrep subprocess)
-- [ ] Wire Anthropic API call with tool use loop
-- [ ] Basic CLI entrypoint: `anvil "<request>"`
+- [x] Initialize TypeScript project (`tsconfig`, `package.json`, `eslint`)
+- [x] Implement `read_file` tool
+- [x] Implement `list_files` tool
+- [x] Implement `text_search` tool (ripgrep subprocess via execa)
+- [x] Wire Kimi/Moonshot API (OpenAI-compatible) tool-use loop with streaming
+- [x] Basic CLI entrypoint: `anvil "<request>" [workdir]`
 - [ ] Make a real file edit end-to-end on a test repo
 - [ ] Write Session 1 log entry
 
