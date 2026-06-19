@@ -16,6 +16,13 @@ export interface Plan {
   risks: string[];
 }
 
+export interface PlannerAnvilCtx {
+  contextSection?: string;
+  rules?: string | null;
+  memory?: string | null;
+  ignorePatterns?: string[];
+}
+
 const SHADOW_BASE = '/tmp/anvil';
 
 const WRITE_PLAN_TOOL: OpenAI.Chat.ChatCompletionTool = {
@@ -68,7 +75,7 @@ const WRITE_PLAN_TOOL: OpenAI.Chat.ChatCompletionTool = {
   },
 };
 
-const PLANNER_SYSTEM = `You are the Planner subagent for Anvil. Your sole job is to explore the codebase and produce a structured implementation plan. You do NOT write any code.
+const BASE_PLANNER_SYSTEM = `You are the Planner subagent for Anvil. Your sole job is to explore the codebase and produce a structured implementation plan. You do NOT write any code.
 
 Exploration workflow:
 1. Start with list_files to understand the project layout
@@ -80,7 +87,6 @@ Exploration workflow:
 When you have a complete picture of what needs to change and why, call write_plan with all 7 fields fully populated. Be specific: list every file that will be touched, every step the executor must take, and every risk.`;
 
 // Planner gets all read-only tools plus the write_plan terminal tool.
-// write_file is excluded; git_log, git_diff, git_blame are included for project history awareness.
 const PLANNER_READONLY = new Set(['write_file']);
 const plannerTools = [
   ...toolDefinitions.filter(t => !PLANNER_READONLY.has(t.function.name)),
@@ -93,23 +99,44 @@ export async function runPlanner(
   sessionId: string,
   feedback?: string,
   gitCtx?: GitContext | null,
+  anvilCtx?: PlannerAnvilCtx,
 ): Promise<string> {
   const client = new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
     baseURL: 'https://api.anthropic.com/v1',
   });
 
+  // Build dynamic system prompt: base + project rules if present
+  let systemPrompt = BASE_PLANNER_SYSTEM;
+  if (anvilCtx?.rules) {
+    systemPrompt += `\n\nProject rules (must be followed):\n${anvilCtx.rules}`;
+  }
+
   const gitSection = gitCtx
     ? `\n\nGit context:\n- Current branch: ${gitCtx.branch}\n- Recent commits:\n${gitCtx.recentCommits.map(c => `  ${c.hash} ${c.date} ${c.message}`).join('\n')}` +
       (gitCtx.unstagedDiff ? `\n- Unstaged changes (first 600 chars):\n${gitCtx.unstagedDiff.slice(0, 600)}` : '')
     : '';
 
-  const userContent = feedback
-    ? `Working directory: ${workdir}\n\nGoal: ${goal}${gitSection}\n\nRevision feedback from user: ${feedback}\n\nPlease revise your plan to address this feedback.`
-    : `Working directory: ${workdir}\n\nGoal: ${goal}${gitSection}`;
+  const contextParts: string[] = [`Working directory: ${workdir}\n\nGoal: ${goal}`];
+
+  if (anvilCtx?.contextSection) {
+    contextParts.push(`\n\n[Context pre-loaded by Anvil]\n${anvilCtx.contextSection}`);
+  }
+
+  if (anvilCtx?.memory) {
+    contextParts.push(`\n\nMemory from previous sessions:\n${anvilCtx.memory}`);
+  }
+
+  if (gitSection) contextParts.push(gitSection);
+
+  if (feedback) {
+    contextParts.push(`\n\nRevision feedback from user: ${feedback}\n\nPlease revise your plan to address this feedback.`);
+  }
+
+  const userContent = contextParts.join('');
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: PLANNER_SYSTEM },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent },
   ];
 
@@ -119,6 +146,8 @@ export async function runPlanner(
 
   uiStream.push({ type: 'phase', phase: 'planning' });
 
+  const ignorePatterns = anvilCtx?.ignorePatterns;
+
   await runStreamingLoop(client, messages, plannerTools, async (name, args) => {
     if (name === 'write_plan') {
       mkdirSync(planDir, { recursive: true });
@@ -126,7 +155,7 @@ export async function runPlanner(
       planWritten = true;
       return { result: `Plan written to ${planPath}`, done: true };
     }
-    const result = await executeTool(name, args, workdir, sessionId);
+    const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
     return { result };
   });
 

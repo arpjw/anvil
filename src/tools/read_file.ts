@@ -1,5 +1,6 @@
+import micromatch from 'micromatch';
 import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, relative } from 'path';
 
 const MAX_CHARS = 40_000;
 
@@ -8,8 +9,18 @@ export async function readFile(
   workdir: string,
   startLine?: number,
   endLine?: number,
+  ignorePatterns?: string[],
 ): Promise<string> {
   const fullPath = resolve(workdir, path);
+
+  if (ignorePatterns && ignorePatterns.length > 0) {
+    const relPath = relative(workdir, fullPath);
+    const normalized = ignorePatterns.map(p => (p.endsWith('/') ? p + '**' : p));
+    if (micromatch.isMatch(relPath, normalized, { dot: true })) {
+      return `File "${path}" is excluded by .anvil/ignore`;
+    }
+  }
+
   try {
     const content = readFileSync(fullPath, 'utf-8');
     let lines = content.split('\n');

@@ -32,6 +32,46 @@
 
 <!-- Entries go below, newest at top -->
 
+## Session 8 — June 19, 2026
+**Phase:** 8 — Context Depth
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/context/mentions.ts: @file (fuzzy resolve), @Symbol (LSP find_symbol),
+  @https:// (fetch + HTML strip, 8000 char cap), @web: (Tavily + DuckDuckGo fallback)
+- Built src/context/project.ts: loadRules, loadMemory (last 2000 chars), 
+  loadIgnore, appendMemory (dated session entries)
+- Built src/context/index.ts: loadContext() runs all resolvers in parallel, 
+  returns unified AnvilContext
+- Updated list_files, read_file, ast_search: accept ignorePatterns, skip via micromatch
+- Updated orchestrator: loadContext first, injects context/rules/memory into planner,
+  appends memory after done fires
+- Created test-repo-2/.anvil/: rules.md, memory.md (fake prior session), ignore
+- Two new UIEvents: context_loaded, memory_written
+- TUI left panel shows context sources loaded after resolution
+
+### Decisions made
+- All mention resolution runs in parallel via Promise.all — no sequential blocking
+- @Symbol detection heuristic: PascalCase + no slashes + not a URL
+- Memory injection capped at last 2000 chars — most recent context is most relevant
+- Rules go into system prompt, context/memory go into user message — 
+  keeps system prompt for instructions, user message for data
+- micromatch for ignore patterns — handles globs correctly including negation
+
+### What broke / was surprising
+- Nothing major — smoke tests passed clean
+
+### State of codebase at close
+- src/context/ complete: mentions, project, index
+- All three tools updated with ignore pattern support
+- .anvil/ directory structure working in test-repo-2
+- @file pre-load ✓, rules ✓, memory ✓, ignore ✓, @AppError → 19 refs ✓
+
+### Next session should start with
+- Phase 9: Execution Environment
+- run_command tool, run_tests tool, post-execution verification pass,
+  headless/CI mode, --dry-run flag
+
 ## Session 7 — June 19, 2026
 **Phase:** 7 — Git Integration
 **Duration:** ~1h

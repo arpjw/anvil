@@ -39,17 +39,48 @@ const PHASE_COLORS: Record<Phase, string> = {
   idle: 'gray', planning: 'yellow', executing: 'cyan', done: 'green', error: 'red',
 };
 
-function LeftPanel({ phase, filesModified, request, plan, gitBranch, commitCount, prPath }: {
+interface ContextSources {
+  filesResolved: number;
+  symbolsResolved: number;
+  docsResolved: number;
+  webResolved: number;
+  rulesLoaded: boolean;
+  memoryLoaded: boolean;
+}
+
+function LeftPanel({
+  phase, filesModified, request, plan, gitBranch, commitCount, prPath,
+  contextSources, memoryWritten,
+}: {
   phase: Phase; filesModified: string[]; request: string; plan: Plan | null;
   gitBranch: string | null; commitCount: number; prPath: string | null;
+  contextSources: ContextSources | null; memoryWritten: boolean;
 }) {
   const truncReq = request.length > 65 ? request.slice(0, 65) + '…' : request;
+
+  const ctxParts: string[] = [];
+  if (contextSources) {
+    if (contextSources.filesResolved > 0) ctxParts.push(`@file x${contextSources.filesResolved}`);
+    if (contextSources.symbolsResolved > 0) ctxParts.push(`@sym x${contextSources.symbolsResolved}`);
+    if (contextSources.docsResolved > 0) ctxParts.push(`@docs x${contextSources.docsResolved}`);
+    if (contextSources.webResolved > 0) ctxParts.push(`@web x${contextSources.webResolved}`);
+    if (contextSources.rulesLoaded) ctxParts.push('rules ✓');
+    if (contextSources.memoryLoaded) ctxParts.push('memory ✓');
+  }
+
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column">
         <Text dimColor>phase</Text>
         <Text color={PHASE_COLORS[phase]} bold>{PHASE_LABELS[phase]}</Text>
       </Box>
+
+      {contextSources && (
+        <Box flexDirection="column">
+          <Text dimColor>context</Text>
+          <Text dimColor>{ctxParts.length > 0 ? ctxParts.join('  ') : 'none'}</Text>
+        </Box>
+      )}
 
       {gitBranch && (
         <Box flexDirection="column">
@@ -86,6 +117,12 @@ function LeftPanel({ phase, filesModified, request, plan, gitBranch, commitCount
         <Box flexDirection="column">
           <Text dimColor>PR description</Text>
           <Text color="magenta">{basename(prPath)}</Text>
+        </Box>
+      )}
+
+      {memoryWritten && (
+        <Box flexDirection="column">
+          <Text color="cyan">✎ memory written</Text>
         </Box>
       )}
     </Box>
@@ -149,6 +186,8 @@ export function App({ request, workdir, sessionId }: AppProps) {
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [commitCount, setCommitCount] = useState(0);
   const [prPath, setPrPath] = useState<string | null>(null);
+  const [contextSources, setContextSources] = useState<ContextSources | null>(null);
+  const [memoryWritten, setMemoryWritten] = useState(false);
 
   const handleEvent = useCallback((event: UIEvent) => {
     switch (event.type) {
@@ -247,6 +286,26 @@ export function App({ request, workdir, sessionId }: AppProps) {
           color: 'yellow',
         }]);
         break;
+
+      case 'context_loaded':
+        setContextSources({
+          filesResolved: event.filesResolved,
+          symbolsResolved: event.symbolsResolved,
+          docsResolved: event.docsResolved,
+          webResolved: event.webResolved,
+          rulesLoaded: event.rulesLoaded,
+          memoryLoaded: event.memoryLoaded,
+        });
+        break;
+
+      case 'memory_written':
+        setMemoryWritten(true);
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `✎ memory written → ${basename(event.path)}`,
+          color: 'cyan',
+        }]);
+        break;
     }
   }, []);
 
@@ -307,6 +366,8 @@ export function App({ request, workdir, sessionId }: AppProps) {
             gitBranch={gitBranch}
             commitCount={commitCount}
             prPath={prPath}
+            contextSources={contextSources}
+            memoryWritten={memoryWritten}
           />
         </Box>
 

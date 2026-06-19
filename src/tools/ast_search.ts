@@ -1,3 +1,4 @@
+import micromatch from 'micromatch';
 import { resolve, join, relative } from 'path';
 import { readdirSync, statSync } from 'fs';
 import { parseFile, queryNodes, type QueryType } from '../treesitter/index.js';
@@ -11,9 +12,10 @@ export async function astSearch(
   searchPath: string,
   workdir: string,
   filePattern?: string,
+  ignorePatterns?: string[],
 ): Promise<string> {
   const fullPath = resolve(workdir, searchPath);
-  const files = collectFiles(fullPath, filePattern);
+  const files = collectFiles(fullPath, workdir, filePattern, ignorePatterns);
 
   if (files.length === 0) {
     return `No supported files found at ${searchPath} (supports .ts, .tsx, .js, .py)`;
@@ -51,22 +53,35 @@ export async function astSearch(
   return result;
 }
 
-function collectFiles(target: string, filePattern?: string): string[] {
+function collectFiles(
+  target: string,
+  workdir: string,
+  filePattern?: string,
+  ignorePatterns?: string[],
+): string[] {
   try {
     const stat = statSync(target);
     if (stat.isFile()) {
-      return isSupportedFile(target) ? [target] : [];
+      if (!isSupportedFile(target)) return [];
+      if (ignorePatterns && isIgnored(relative(workdir, target), ignorePatterns)) return [];
+      return [target];
     }
   } catch {
     return [];
   }
 
   const results: string[] = [];
-  walk(target, results, filePattern);
+  walk(target, workdir, results, filePattern, ignorePatterns);
   return results;
 }
 
-function walk(dir: string, out: string[], filePattern?: string): void {
+function walk(
+  dir: string,
+  workdir: string,
+  out: string[],
+  filePattern?: string,
+  ignorePatterns?: string[],
+): void {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -79,12 +94,21 @@ function walk(dir: string, out: string[], filePattern?: string): void {
     if (SKIP_DIRS.has(entry.name)) continue;
 
     const fullPath = join(dir, entry.name);
+    const relPath = relative(workdir, fullPath);
+
+    if (ignorePatterns && isIgnored(relPath, ignorePatterns)) continue;
+
     if (entry.isDirectory()) {
-      walk(fullPath, out, filePattern);
+      walk(fullPath, workdir, out, filePattern, ignorePatterns);
     } else if (isSupportedFile(entry.name) && matchesPattern(entry.name, filePattern)) {
       out.push(fullPath);
     }
   }
+}
+
+function isIgnored(relPath: string, patterns: string[]): boolean {
+  const normalized = patterns.map(p => (p.endsWith('/') ? p + '**' : p));
+  return micromatch.isMatch(relPath, normalized, { dot: true });
 }
 
 function isSupportedFile(name: string): boolean {

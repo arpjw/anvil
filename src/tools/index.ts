@@ -209,6 +209,7 @@ export async function executeTool(
   args: Record<string, unknown>,
   workdir: string,
   sessionId: string,
+  ignorePatterns?: string[],
 ): Promise<string> {
   switch (name) {
     case 'read_file':
@@ -217,9 +218,10 @@ export async function executeTool(
         workdir,
         args.start_line as number | undefined,
         args.end_line as number | undefined,
+        ignorePatterns,
       );
     case 'list_files':
-      return listFiles(args.path as string, workdir, args.pattern as string | undefined);
+      return listFiles(args.path as string, workdir, args.pattern as string | undefined, ignorePatterns);
     case 'text_search':
       return textSearch(args.pattern as string, args.path as string, workdir, {
         filePattern: args.file_pattern as string | undefined,
@@ -234,6 +236,7 @@ export async function executeTool(
         args.path as string,
         workdir,
         args.file_pattern as string | undefined,
+        ignorePatterns,
       );
     case 'find_symbol':
       return findSymbol(args.symbol as string, args.file as string, workdir);

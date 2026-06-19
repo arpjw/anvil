@@ -18,7 +18,17 @@ export type UIEvent =
   | { type: 'branch_created'; branchName: string }
   | { type: 'file_committed'; filepath: string; message: string; commitHash: string }
   | { type: 'pr_description_ready'; path: string }
-  | { type: 'rollback_complete'; filesRestored: string[] };
+  | { type: 'rollback_complete'; filesRestored: string[] }
+  | {
+      type: 'context_loaded';
+      filesResolved: number;
+      symbolsResolved: number;
+      docsResolved: number;
+      webResolved: number;
+      rulesLoaded: boolean;
+      memoryLoaded: boolean;
+    }
+  | { type: 'memory_written'; path: string };
 
 class UIStream extends EventEmitter {
   private _done = false;

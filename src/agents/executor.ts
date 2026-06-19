@@ -31,6 +31,7 @@ export async function runExecutor(
   plan: Plan,
   workdir: string,
   sessionId: string,
+  ignorePatterns?: string[],
 ): Promise<ExecutorReport> {
   const client = new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -64,7 +65,7 @@ export async function runExecutor(
       }
     }
 
-    const result = await executeTool(name, args, workdir, sessionId);
+    const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
 
     if (result.startsWith('ESCALATION:')) {
       escalations.push(result);

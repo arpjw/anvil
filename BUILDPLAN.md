@@ -114,21 +114,21 @@
 
 ---
 
-## Phase 8 — Context Depth
+## Phase 8 — Context Depth ✓
 **Goal:** Rich context references in requests. Anvil understands @mentions, loads project rules automatically, and remembers decisions across sessions.
 
 **Done when:** `anvil "fix the auth error in @src/auth.ts using the pattern from @src/db.ts"` resolves both files, loads `.anvil/rules.md`, and applies memory from previous sessions.
 
-- [ ] **@file mentions**: parse `@<filepath>` in requests, resolve to absolute path, pre-load file content into planner context before exploration starts — agent never has to search for explicitly mentioned files
-- [ ] **@symbol mentions**: parse `@<SymbolName>` in requests, run `find_symbol` automatically at session start, inject definition + references into context
-- [ ] **@docs mentions**: parse `@<url>` in requests, fetch the URL content, strip to readable text, inject into planner context — lets agent use external documentation
-- [ ] **@web mentions**: parse `@web:<query>` in requests, run a web search, inject top 3 results as context — agent can reference current library docs or error explanations
-- [ ] **`.anvil/rules.md`**: auto-loaded at every session start if present in workdir. Contains repo-specific instructions: code style, off-limits directories, naming conventions, testing requirements. Injected into orchestrator system prompt before any agent runs.
-- [ ] **`.anvil/memory.md`**: persistent memory file. Orchestrator appends a summary entry after every session: what was changed, what decisions were made, what patterns the codebase uses. Planner reads this at session start to avoid re-learning the codebase from scratch.
-- [ ] **`.anvil/ignore`**: like `.gitignore` but for Anvil. Files and directories listed here are never read, listed, or modified by any agent. Enforced in `list_files`, `read_file`, `ast_search`, and `write_file`.
-- [ ] Update TUI to show active context sources in left panel: which @mentions resolved, whether rules.md and memory.md were loaded
-- [ ] Test: session with @file, @symbol, @docs mentions — verify all resolve correctly and appear in planner context before first tool call
-- [ ] Write Session 8 log entry
+- [x] **@file mentions**: parse `@<filepath>` in requests, resolve to absolute path, pre-load file content into planner context before exploration starts — agent never has to search for explicitly mentioned files
+- [x] **@symbol mentions**: parse `@<SymbolName>` in requests, run `find_symbol` automatically at session start, inject definition + references into context
+- [x] **@docs mentions**: parse `@<url>` in requests, fetch the URL content, strip to readable text, inject into planner context — lets agent use external documentation
+- [x] **@web mentions**: parse `@web:<query>` in requests, run a web search, inject top 3 results as context — agent can reference current library docs or error explanations
+- [x] **`.anvil/rules.md`**: auto-loaded at every session start if present in workdir. Contains repo-specific instructions: code style, off-limits directories, naming conventions, testing requirements. Injected into orchestrator system prompt before any agent runs.
+- [x] **`.anvil/memory.md`**: persistent memory file. Orchestrator appends a summary entry after every session: what was changed, what decisions were made, what patterns the codebase uses. Planner reads this at session start to avoid re-learning the codebase from scratch.
+- [x] **`.anvil/ignore`**: like `.gitignore` but for Anvil. Files and directories listed here are never read, listed, or modified by any agent. Enforced in `list_files`, `read_file`, `ast_search`, and `write_file`.
+- [x] Update TUI to show active context sources in left panel: which @mentions resolved, whether rules.md and memory.md were loaded
+- [x] Test: session with @file, @symbol, @docs mentions — verify all resolve correctly and appear in planner context before first tool call
+- [x] Write Session 8 log entry
 
 ---
 

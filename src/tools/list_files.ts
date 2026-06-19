@@ -1,3 +1,4 @@
+import micromatch from 'micromatch';
 import { readdirSync } from 'fs';
 import { resolve, join, relative } from 'path';
 
@@ -8,11 +9,12 @@ export async function listFiles(
   path: string,
   workdir: string,
   pattern?: string,
+  ignorePatterns?: string[],
 ): Promise<string> {
   const fullPath = resolve(workdir, path);
   const results: string[] = [];
   try {
-    walk(fullPath, results, workdir, pattern);
+    walk(fullPath, results, workdir, pattern, ignorePatterns);
     if (results.length === 0) return 'No files found';
     const truncated = results.length > MAX_ENTRIES;
     const output = results.slice(0, MAX_ENTRIES).join('\n');
@@ -22,7 +24,13 @@ export async function listFiles(
   }
 }
 
-function walk(dir: string, out: string[], workdir: string, pattern?: string): void {
+function walk(
+  dir: string,
+  out: string[],
+  workdir: string,
+  pattern?: string,
+  ignorePatterns?: string[],
+): void {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -37,13 +45,20 @@ function walk(dir: string, out: string[], workdir: string, pattern?: string): vo
     const fullPath = join(dir, entry.name);
     const relPath = relative(workdir, fullPath);
 
+    if (ignorePatterns && isIgnored(relPath, ignorePatterns)) continue;
+
     if (entry.isDirectory()) {
       out.push(`${relPath}/`);
-      walk(fullPath, out, workdir, pattern);
+      walk(fullPath, out, workdir, pattern, ignorePatterns);
     } else if (!pattern || matchGlob(entry.name, pattern)) {
       out.push(relPath);
     }
   }
+}
+
+function isIgnored(relPath: string, patterns: string[]): boolean {
+  const normalized = patterns.map(p => (p.endsWith('/') ? p + '**' : p));
+  return micromatch.isMatch(relPath, normalized, { dot: true });
 }
 
 function matchGlob(name: string, pattern: string): boolean {

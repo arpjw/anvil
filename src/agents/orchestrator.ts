@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { resolve, relative } from 'path';
+import { resolve, relative, join } from 'path';
 import { runPlanner, type Plan } from './planner.js';
 import { runExecutor } from './executor.js';
 import { uiStream, type UIEvent } from '../ui/stream.js';
@@ -9,6 +9,7 @@ import {
   commitFile,
   generatePRDescription,
 } from '../git/client.js';
+import { loadContext, buildContextSection, appendMemory } from '../context/index.js';
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
 
@@ -31,24 +32,53 @@ export async function runOrchestrator(
   workdir: string,
   sessionId: string,
 ): Promise<void> {
-  // Fetch git context once — injected into the planner for project awareness.
+  // ── Step 1: Load all context before anything else ────────────────────────────
+  const ctx = await loadContext(request, workdir);
+
+  uiStream.push({
+    type: 'context_loaded',
+    filesResolved: ctx.files.length,
+    symbolsResolved: ctx.symbols.length,
+    docsResolved: ctx.docs.length,
+    webResolved: ctx.web.length,
+    rulesLoaded: ctx.rules !== null,
+    memoryLoaded: ctx.memory !== null,
+  });
+
+  const contextSection = buildContextSection(ctx);
+  const { ignorePatterns } = ctx;
+
+  // Use cleanRequest (mentions stripped) for everything downstream
+  const cleanRequest = ctx.cleanRequest || request;
+
+  // ── Step 2: Fetch git context ────────────────────────────────────────────────
   const gitCtx = await getGitContext(workdir).catch(() => null);
 
+  // ── Helper: capture done summary for memory ──────────────────────────────────
+  let doneSummary = '';
+  const captureDone = (ev: UIEvent): void => {
+    if (ev.type === 'done') doneSummary = ev.summary;
+  };
+
   // ── Simple path ──────────────────────────────────────────────────────────────
-  if (!isComplex(request)) {
+  if (!isComplex(cleanRequest)) {
     const plan: Plan = {
-      goal: request,
+      goal: cleanRequest,
       context: 'Single-file request, planner skipped.',
       filesToModify: [],
       filesToCreate: [],
-      steps: [request],
+      steps: [cleanRequest],
       verificationCriteria: [],
       risks: [],
     };
 
+    uiStream.on('event', captureDone);
     uiStream.push({ type: 'phase', phase: 'executing' });
-    const report = await runExecutor(plan, workdir, sessionId);
+    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns);
+    uiStream.off('event', captureDone);
+
     reportEscalations(report.escalations);
+    await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
     return;
   }
 
@@ -58,7 +88,12 @@ export async function runOrchestrator(
 
   for (;;) {
     const [planPath] = await Promise.all([
-      runPlanner(request, workdir, sessionId, feedback, gitCtx),
+      runPlanner(cleanRequest, workdir, sessionId, feedback, gitCtx, {
+        contextSection: contextSection || undefined,
+        rules: ctx.rules,
+        memory: ctx.memory,
+        ignorePatterns,
+      }),
     ]);
 
     plan = JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
@@ -83,7 +118,6 @@ export async function runOrchestrator(
     branchName = await createSessionBranch(workdir, sessionId);
     uiStream.push({ type: 'branch_created', branchName });
   } catch (err) {
-    // Non-fatal — git may not be initialized, or another issue. Continue anyway.
     uiStream.push({ type: 'error', message: `Branch creation failed: ${(err as Error).message}` });
   }
 
@@ -103,22 +137,25 @@ export async function runOrchestrator(
         const hash = await commitFile(workdir, filepath, message);
         uiStream.push({ type: 'file_committed', filepath, message, commitHash: hash });
       } catch (err) {
-        // Git commit failure is logged but not fatal — the file is still on disk.
         uiStream.push({ type: 'error', message: `git commit failed: ${(err as Error).message}` });
       }
     });
   };
 
   uiStream.on('event', handleFileModified);
+  uiStream.on('event', captureDone);
 
   uiStream.push({ type: 'phase', phase: 'executing' });
-  const report = await runExecutor(planRef, workdir, sessionId);
+  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns);
 
   // Drain the commit queue before post-session steps.
   await commitQueue;
   uiStream.off('event', handleFileModified);
+  uiStream.off('event', captureDone);
 
   reportEscalations(report.escalations);
+
+  await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
 
   if (report.success && branchName) {
     try {
@@ -131,6 +168,22 @@ export async function runOrchestrator(
   } else {
     uiStream.ensureDone('All steps completed successfully.');
   }
+}
+
+async function maybeAppendMemory(
+  workdir: string,
+  sessionId: string,
+  summary: string,
+  ctx: { rules: string | null; memory: string | null },
+): Promise<void> {
+  if (!summary) return;
+  try {
+    appendMemory(workdir, sessionId, summary);
+    uiStream.push({
+      type: 'memory_written',
+      path: join(workdir, '.anvil', 'memory.md'),
+    });
+  } catch { /* non-fatal */ }
 }
 
 function reportEscalations(escalations: string[]): void {
