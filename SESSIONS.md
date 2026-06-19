@@ -32,6 +32,44 @@
 
 <!-- Entries go below, newest at top -->
 
+## Session 7 — June 19, 2026
+**Phase:** 7 — Git Integration
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/git/client.ts: getGitContext, createSessionBranch, commitFile,
+  rollbackSession, generatePRDescription via simple-git
+- Built git_log, git_diff, git_blame as planner-accessible read-only tools
+- Orchestrator now: injects git context into system prompt at session start,
+  auto-branches before executor on complex requests, commits each file after
+  shadow workspace confirms clean, generates PR description after done fires
+- Four new UIEvents: branch_created, file_committed, pr_description_ready, rollback_complete
+- TUI left panel: current branch, live commit counter, PR description path on completion
+- anvil --rollback <sessionId>: hard-reset to merge-base, branch deleted, original branch restored
+- Verified with 15-assertion integration test
+
+### Decisions made
+- simple-git for all git operations — clean async API, handles edge cases
+- Hard-reset to merge-base for rollback rather than reverting individual commits —
+  safer and handles reordered or squashed commits correctly
+- Git context injected into orchestrator system prompt, not planner —
+  orchestrator decides branching strategy, planner uses git tools for exploration only
+- commitFile called after each file_modified event, serialized —
+  never batches commits, each file gets its own atomic commit
+
+### What broke / was surprising
+- Nothing major — 15-assertion test passed clean
+
+### State of codebase at close
+- src/git/ complete, all three git tools registered and in planner tool list
+- Full git lifecycle working: branch → commit per file → PR description → rollback
+- TUI reflects git state live
+
+### Next session should start with
+- Phase 8: Context Depth
+- @file, @symbol, @docs, @web mention parsing
+- .anvil/rules.md, .anvil/memory.md, .anvil/ignore
+
 ## Session 5 — June 18, 2026
 **Phase:** 5 — TUI + Polish
 **Duration:** ~1h

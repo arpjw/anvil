@@ -5,26 +5,22 @@
 
 ---
 
-## Phase 1 — Skeleton
-**Goal:** A working end-to-end agent loop. One agent, no subagents, no shadow workspace. Prove the basic pipeline works on a real file before adding complexity.
-
-**Done when:** Running `anvil "add error handling to main.ts"` on a real repo makes a correct edit.
+## Phase 1 — Skeleton ✓
+**Goal:** A working end-to-end agent loop. One agent, no subagents, no shadow workspace.
 
 - [x] Initialize TypeScript project (`tsconfig`, `package.json`, `eslint`)
 - [x] Implement `read_file` tool
 - [x] Implement `list_files` tool
-- [x] Implement `text_search` tool (ripgrep subprocess via execa)
-- [x] Wire Kimi/Moonshot API (OpenAI-compatible) tool-use loop with streaming
-- [x] Basic CLI entrypoint: `anvil "<request>" [workdir]`
+- [x] Implement `text_search` tool (ripgrep subprocess)
+- [x] Wire Anthropic API call with tool use loop
+- [x] Basic CLI entrypoint: `anvil "<request>"`
 - [x] Make a real file edit end-to-end on a test repo
 - [x] Write Session 1 log entry
 
 ---
 
-## Phase 2 — Context Engine
-**Goal:** Agentic, multi-step retrieval that actually understands code structure. The agent should locate relevant code in an unfamiliar 10k+ line codebase in under 5 tool calls.
-
-**Done when:** Given a medium codebase and a natural language request, the agent finds the right files without being told where to look.
+## Phase 2 — Context Engine ✓
+**Goal:** Agentic, multi-step retrieval that actually understands code structure.
 
 - [x] Integrate tree-sitter (TypeScript + Go + Python grammars)
 - [x] Implement `ast_search`: query by node type, extract function signatures, find imports
@@ -39,10 +35,8 @@
 
 ---
 
-## Phase 3 — Shadow Workspace
-**Goal:** No edit ever touches the real filesystem until it passes LSP diagnostics. The feedback loop that makes edits trustworthy.
-
-**Done when:** An intentionally broken edit is proposed, rejected by shadow workspace, self-corrected, and committed — all automatically.
+## Phase 3 — Shadow Workspace ✓
+**Goal:** No edit ever touches the real filesystem until it passes LSP diagnostics.
 
 - [x] Shadow copy mechanism: mirror target file to `/tmp/anvil/<sessionId>/shadow/`
 - [x] Apply edit to shadow copy only
@@ -56,10 +50,8 @@
 
 ---
 
-## Phase 4 — Subagent Split
+## Phase 4 — Subagent Split ✓
 **Goal:** Separate Planner and Executor with strict tool isolation. User approves plan before any writes happen.
-
-**Done when:** A complex multi-file request flows through Orchestrator → Planner (user approves plan) → Executor → Shadow Workspace → committed edits.
 
 - [x] Define subagent interface and message passing protocol
 - [x] Implement Planner subagent (read-only tools only)
@@ -68,36 +60,128 @@
 - [x] Implement Orchestrator: spawn/coordinate subagents, own todo list
 - [x] User approval gate: show plan, wait for approve/revise
 - [x] Concurrent subagent support (`Promise.all` for independent queries)
+- [x] `done` tool: clean exit signal with summary
 - [x] Test: multi-file refactor flows correctly through all three agents
 - [x] Write Session 4 log entry
 
 ---
 
-## Phase 5 — TUI + Polish
-**Goal:** Looks and feels like a real tool. Shadow workspace cycles visible. Sessions persistent.
+## Phase 5 — TUI ✓
+**Goal:** Looks and feels like a real tool. Shadow workspace cycles visible. Live tool call display.
 
-**Done when:** A non-technical person watching over your shoulder understands what's happening at every moment.
-
-- [x] Integrate Ink (React for CLIs) or Blessed for TUI
-- [x] Session list panel (left) + chat/log panel (right)
-- [x] Inline tool call display: show active tool, args, result summary
-- [x] Shadow workspace cycle display: "validating... 2 errors... retrying... clean ✓"
-- [ ] SQLite session persistence: save/resume sessions
-- [ ] Config file: model selection, LSP binary paths, project root
+- [x] Integrate Ink (React for CLIs)
+- [x] figlet ANVIL header, session ID and workdir beneath
+- [x] 28/72 two-panel layout: session info left, activity log right
+- [x] ToolCall.tsx: amber tool name, braille spinner, result preview
+- [x] ShadowCycle.tsx: shadow[N/3] → validating → ✓ committed / ✖ retrying
+- [x] PlanDisplay.tsx: round yellow-border box, all 7 plan fields
+- [x] StatusBar.tsx: model · phase (colored) · elapsed time
+- [x] Event stream architecture: typed UIEvent union, agents emit events, UI is purely reactive
+- [x] waitForApproval/resolveApproval replaces readline for Ink compatibility
 - [x] Write Session 5 log entry
 
 ---
 
-## Phase 6 — Writeup
-**Goal:** The document that makes this project land at Cursor. Evidence-based, problem-first, honest about tradeoffs.
+## Phase 6 — Writeup (in progress)
+**Goal:** Technical deep dive published at anvil.aryasomu.com. The document that makes this land at Cursor.
 
-**Done when:** Someone at Cursor reads it and learns something about the problem they work on every day.
+- [ ] Section 1: Why I built this — the three failure modes of naive agents
+- [ ] Section 2: Shadow workspace — Cursor's approach vs filesystem-level implementation, publishDiagnostics insight, db.ts self-correction example
+- [ ] Section 3: Agentic context retrieval — why RAG fails on codebases, 5-tool retrieval surface, User→Account rename walkthrough
+- [ ] Section 4: Subagent isolation — three rules and why each matters, approval gate
+- [ ] Section 5: What editor-level access would unlock — the four things you can't do without a VS Code fork
+- [ ] Section 6: What I learned — the hardest parts were in the scaffold, not the model
+- [ ] Publish at anvil.aryasomu.com
+- [ ] Update README to link to writeup
+- [ ] Write Session 6 log entry
 
-- [ ] Section 1: The problem — why naive coding agents fail (with specific failure examples from your own logs)
-- [ ] Section 2: Shadow workspace — what it is, why it matters, how you implemented it at the filesystem level vs Cursor's editor level
-- [ ] Section 3: Context retrieval — naive grep vs agentic AST/LSP retrieval, benchmark results
-- [ ] Section 4: Subagent isolation — why tool boundaries matter, what breaks without them
-- [ ] Section 5: What you'd do next with editor-level access
-- [ ] Publish to personal site or SSRN
-- [ ] Link from GitHub README
-- [ ] Write final session log entry
+---
+
+## Phase 7 — Git Integration ✓
+**Goal:** Anvil is git-aware. Every session is safe to run on a real codebase because it branches, commits, and can roll back.
+
+**Done when:** Running a multi-file edit auto-creates a branch, commits each file with a meaningful message, and `anvil --rollback` returns the repo to pre-session state.
+
+- [x] Read git context at session start: current branch, last 10 commits, staged/unstaged diff — inject into orchestrator system prompt
+- [x] Auto-branch before any multi-file edit: `anvil/session-<sessionId>-<date>` naming convention
+- [x] Commit each file immediately after shadow workspace confirms clean: meaningful commit message generated by the agent describing what changed and why
+- [x] `anvil --rollback <sessionId>`: revert all commits from a session, delete the session branch, restore original state
+- [x] PR description generation: after session completes, generate a structured PR description (summary, files changed, motivation, testing notes) and write it to `.anvil/pr-<sessionId>.md`
+- [x] Git-aware context tools: `git_log` tool (last N commits with diffs), `git_diff` tool (current unstaged changes), `git_blame` tool (who last touched a line and when) — all callable by planner
+- [x] Expose git context in TUI: current branch shown in left panel, commit count for session updated live
+- [x] Test: run a multi-file refactor, verify branch created, each file committed, rollback restores original state cleanly
+- [x] Write Session 7 log entry
+
+---
+
+## Phase 8 — Context Depth
+**Goal:** Rich context references in requests. Anvil understands @mentions, loads project rules automatically, and remembers decisions across sessions.
+
+**Done when:** `anvil "fix the auth error in @src/auth.ts using the pattern from @src/db.ts"` resolves both files, loads `.anvil/rules.md`, and applies memory from previous sessions.
+
+- [ ] **@file mentions**: parse `@<filepath>` in requests, resolve to absolute path, pre-load file content into planner context before exploration starts — agent never has to search for explicitly mentioned files
+- [ ] **@symbol mentions**: parse `@<SymbolName>` in requests, run `find_symbol` automatically at session start, inject definition + references into context
+- [ ] **@docs mentions**: parse `@<url>` in requests, fetch the URL content, strip to readable text, inject into planner context — lets agent use external documentation
+- [ ] **@web mentions**: parse `@web:<query>` in requests, run a web search, inject top 3 results as context — agent can reference current library docs or error explanations
+- [ ] **`.anvil/rules.md`**: auto-loaded at every session start if present in workdir. Contains repo-specific instructions: code style, off-limits directories, naming conventions, testing requirements. Injected into orchestrator system prompt before any agent runs.
+- [ ] **`.anvil/memory.md`**: persistent memory file. Orchestrator appends a summary entry after every session: what was changed, what decisions were made, what patterns the codebase uses. Planner reads this at session start to avoid re-learning the codebase from scratch.
+- [ ] **`.anvil/ignore`**: like `.gitignore` but for Anvil. Files and directories listed here are never read, listed, or modified by any agent. Enforced in `list_files`, `read_file`, `ast_search`, and `write_file`.
+- [ ] Update TUI to show active context sources in left panel: which @mentions resolved, whether rules.md and memory.md were loaded
+- [ ] Test: session with @file, @symbol, @docs mentions — verify all resolve correctly and appear in planner context before first tool call
+- [ ] Write Session 8 log entry
+
+---
+
+## Phase 9 — Execution Environment
+**Goal:** Anvil can run commands, read their output, and react. Edits are verified by actually running the code, not just type-checking it.
+
+**Done when:** After making edits, Anvil runs the test suite, reads failures, and autonomously fixes them — all in one session without user intervention.
+
+- [ ] **`run_command` tool**: executes a shell command in the workdir, captures stdout + stderr + exit code, returns to agent. Timeout enforced (30s default, configurable). Blocked commands list: `rm -rf /`, `sudo`, anything touching outside workdir.
+- [ ] **`run_tests` tool**: detects test runner from project config (`package.json` scripts, `pytest.ini`, `Cargo.toml`) and runs it. Returns pass/fail count, failing test names, error output. Agent uses this to verify edits worked.
+- [ ] **Post-execution verification pass**: after executor marks session done, orchestrator automatically runs `run_tests` + type-check. If failures found, spawns a new executor pass with the failure output as context. Max 2 auto-fix rounds.
+- [ ] **Build verification**: detect build command from project config, run it after edits, surface build errors to executor for self-correction — same feedback loop as shadow workspace but at the build level.
+- [ ] **Headless / CI mode**: `anvil --headless "<request>" <workdir>` — no TUI, no approval gate, JSON output to stdout, exit code 0 on success / 1 on failure. Designed for use in GitHub Actions or other CI pipelines.
+- [ ] **`anvil --dry-run`**: runs the full planner pass, prints the plan, but does not spawn executor. No files are touched. Useful for previewing what a complex request would do.
+- [ ] **Command output in TUI**: `run_command` and `run_tests` results shown in activity log with colored pass/fail indicators, test count, and collapsible error details
+- [ ] Test: make a broken edit manually, run `anvil "fix the failing tests"`, verify agent reads test output and fixes the root cause
+- [ ] Write Session 9 log entry
+
+---
+
+## Phase 10 — Edit Quality
+**Goal:** Every edit surface is trustworthy and user-controlled. Diffs are visible before commit. Interrupts are safe. Images can be used as context.
+
+**Done when:** User can review a colored per-file diff, accept/reject individual hunks, interrupt mid-session safely, and paste a screenshot as task context.
+
+- [ ] **Diff view before commit**: after shadow workspace confirms clean but before committing to real file, render a colored unified diff in the TUI (green additions, red deletions). User sees exact line-by-line changes.
+- [ ] **Per-hunk accept/reject**: in the diff view, user can navigate hunks with arrow keys and accept (a) or reject (r) individual changes. Rejected hunks are excluded from the commit. Accepted hunks commit immediately.
+- [ ] **DiffView.tsx component**: new Ink component. Shows filename header, line numbers, colored diff lines, hunk navigation controls, accept/reject keybindings. Integrates with the event stream — `diff_ready` event triggers display.
+- [ ] **Graceful interrupt (Ctrl+C handling)**: intercept SIGINT during execution. Instead of killing the process, pause after the current file completes. Show what was done so far, what remains. Prompt: "Stop here? (y = commit what's done, n = continue, r = rollback everything)". Never leave files in a half-edited state.
+- [ ] **Multimodal input**: `anvil --image <path> "<request>"` — accepts a PNG/JPG of an error message, UI mockup, or diagram. Image is base64-encoded and passed as vision context to the planner. Planner describes what it sees and uses it to inform the plan.
+- [ ] **Session resume**: `anvil --resume <sessionId>` — reload a previous session's plan and memory, continue from where it left off. Useful when a session was interrupted or when a plan needs multiple execution passes.
+- [ ] **Edit size guard**: before spawning executor, estimate token count of all planned edits. If over threshold (e.g. 20 files), warn user and ask for confirmation. Prevents runaway sessions on large codebases.
+- [ ] Test: run a multi-file session, reject one hunk in the diff view, verify that hunk is excluded from the committed file while all others apply cleanly
+- [ ] Test: interrupt mid-session with Ctrl+C, choose rollback, verify all files restored to pre-session state
+- [ ] Write Session 10 log entry
+
+---
+
+## Phase 11 — Distribution
+**Goal:** Anyone can install and run Anvil in under 60 seconds. No manual LSP setup, no repo cloning.
+
+**Done when:** `npm install -g anvil-agent && anvil "add error handling to main.ts" .` works on a fresh machine with no prior setup.
+
+- [ ] **Compiled binary**: use `bun build --compile` to produce a single self-contained executable for macOS (arm64 + x64), Linux (x64), Windows (x64). No Node.js required to run.
+- [ ] **npm package**: publish as `anvil-agent` on npm. Entry point: `anvil` CLI command. Includes compiled binaries for all platforms via `optionalDependencies` pattern (same as esbuild).
+- [ ] **Auto LSP install**: on first run, detect which language servers are missing for the workdir's languages. Prompt user once: "TypeScript files detected. Install typescript-language-server? (y/n)". Run `npm install -g <server>` automatically on yes. Store installed state in `~/.anvil/lsp.json`.
+- [ ] **`~/.anvil/config.json`**: global config file. Stores: default model, API key (alternative to env var), preferred LSP binary paths, default retry count, TUI preferences (color scheme, panel widths). `anvil config set <key> <value>` CLI command to edit.
+- [ ] **Custom slash commands**: `.anvil/commands/` directory in project root. Each `.md` file is a slash command: filename is the command name, content is the system prompt. `anvil /review` runs the `review.md` command against the current repo. Listed in TUI with `/` prefix.
+- [ ] **`anvil init`**: interactive setup command for a new project. Creates `.anvil/rules.md` (prompts for code style, off-limits dirs, test command), `.anvil/ignore`, `.anvil/commands/` with starter commands (review, document, test). Adds `.anvil/memory.md` to `.gitignore`.
+- [ ] **`anvil doctor`**: diagnostic command. Checks: API key set, LSP servers installed for detected languages, ripgrep available, Node version, available disk space in `/tmp`. Prints pass/fail for each check with fix instructions.
+- [ ] **GitHub Actions integration**: publish `arpjw/anvil-action` — a reusable GitHub Action that runs Anvil in headless mode. Inputs: `request`, `workdir`, `anthropic_api_key`. Outputs: `session_id`, `files_modified`, `pr_description`. Example workflow: on PR open, run `anvil "fix any type errors"` and commit the result.
+- [ ] **README install section**: clear, copy-pasteable install instructions. Three paths: npm global install, compiled binary download, run from source.
+- [ ] **`anvil --version`**: prints current version from `package.json`.
+- [ ] Test: fresh machine (or Docker container with no Node globals), `npm install -g anvil-agent`, run against a TypeScript project, verify LSP auto-installs and session completes successfully
+- [ ] Write Session 11 log entry
+

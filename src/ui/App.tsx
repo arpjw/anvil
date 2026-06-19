@@ -39,8 +39,9 @@ const PHASE_COLORS: Record<Phase, string> = {
   idle: 'gray', planning: 'yellow', executing: 'cyan', done: 'green', error: 'red',
 };
 
-function LeftPanel({ phase, filesModified, request, plan }: {
+function LeftPanel({ phase, filesModified, request, plan, gitBranch, commitCount, prPath }: {
   phase: Phase; filesModified: string[]; request: string; plan: Plan | null;
+  gitBranch: string | null; commitCount: number; prPath: string | null;
 }) {
   const truncReq = request.length > 65 ? request.slice(0, 65) + '…' : request;
   return (
@@ -49,6 +50,16 @@ function LeftPanel({ phase, filesModified, request, plan }: {
         <Text dimColor>phase</Text>
         <Text color={PHASE_COLORS[phase]} bold>{PHASE_LABELS[phase]}</Text>
       </Box>
+
+      {gitBranch && (
+        <Box flexDirection="column">
+          <Text dimColor>branch</Text>
+          <Text color="cyan">{gitBranch}</Text>
+          {commitCount > 0 && (
+            <Text dimColor>commits this session: {commitCount}</Text>
+          )}
+        </Box>
+      )}
 
       <Box flexDirection="column">
         <Text dimColor>request</Text>
@@ -68,6 +79,13 @@ function LeftPanel({ phase, filesModified, request, plan }: {
           {filesModified.map((f, i) => (
             <Text key={i} color="green">+ {basename(f)}</Text>
           ))}
+        </Box>
+      )}
+
+      {prPath && (
+        <Box flexDirection="column">
+          <Text dimColor>PR description</Text>
+          <Text color="magenta">{basename(prPath)}</Text>
         </Box>
       )}
     </Box>
@@ -128,6 +146,9 @@ export function App({ request, workdir, sessionId }: AppProps) {
   const [filesModified, setFilesModified] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [startTime] = useState(() => Date.now());
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const [commitCount, setCommitCount] = useState(0);
+  const [prPath, setPrPath] = useState<string | null>(null);
 
   const handleEvent = useCallback((event: UIEvent) => {
     switch (event.type) {
@@ -199,6 +220,33 @@ export function App({ request, workdir, sessionId }: AppProps) {
 
       case 'model_text':
         break; // reasoning text not shown in the activity log
+
+      case 'branch_created':
+        setGitBranch(event.branchName);
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: `⎇ ${event.branchName}`, color: 'cyan' }]);
+        break;
+
+      case 'file_committed':
+        setCommitCount(prev => prev + 1);
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `✔ committed ${basename(event.filepath)} [${event.commitHash.slice(0, 7)}]`,
+          color: 'green',
+        }]);
+        break;
+
+      case 'pr_description_ready':
+        setPrPath(event.path);
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: `📄 PR → ${event.path}`, color: 'magenta' }]);
+        break;
+
+      case 'rollback_complete':
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `↩ rollback complete — ${event.filesRestored.length} file(s) restored`,
+          color: 'yellow',
+        }]);
+        break;
     }
   }, []);
 
@@ -256,6 +304,9 @@ export function App({ request, workdir, sessionId }: AppProps) {
             filesModified={filesModified}
             request={request}
             plan={plan}
+            gitBranch={gitBranch}
+            commitCount={commitCount}
+            prPath={prPath}
           />
         </Box>
 

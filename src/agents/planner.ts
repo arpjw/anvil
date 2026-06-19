@@ -4,6 +4,7 @@ import { join } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
 import { uiStream } from '../ui/stream.js';
+import type { GitContext } from '../git/client.js';
 
 export interface Plan {
   goal: string;
@@ -79,8 +80,10 @@ Exploration workflow:
 When you have a complete picture of what needs to change and why, call write_plan with all 7 fields fully populated. Be specific: list every file that will be touched, every step the executor must take, and every risk.`;
 
 // Planner gets all read-only tools plus the write_plan terminal tool.
+// write_file is excluded; git_log, git_diff, git_blame are included for project history awareness.
+const PLANNER_READONLY = new Set(['write_file']);
 const plannerTools = [
-  ...toolDefinitions.filter(t => t.function.name !== 'write_file'),
+  ...toolDefinitions.filter(t => !PLANNER_READONLY.has(t.function.name)),
   WRITE_PLAN_TOOL,
 ];
 
@@ -89,15 +92,21 @@ export async function runPlanner(
   workdir: string,
   sessionId: string,
   feedback?: string,
+  gitCtx?: GitContext | null,
 ): Promise<string> {
   const client = new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
     baseURL: 'https://api.anthropic.com/v1',
   });
 
+  const gitSection = gitCtx
+    ? `\n\nGit context:\n- Current branch: ${gitCtx.branch}\n- Recent commits:\n${gitCtx.recentCommits.map(c => `  ${c.hash} ${c.date} ${c.message}`).join('\n')}` +
+      (gitCtx.unstagedDiff ? `\n- Unstaged changes (first 600 chars):\n${gitCtx.unstagedDiff.slice(0, 600)}` : '')
+    : '';
+
   const userContent = feedback
-    ? `Working directory: ${workdir}\n\nGoal: ${goal}\n\nRevision feedback from user: ${feedback}\n\nPlease revise your plan to address this feedback.`
-    : `Working directory: ${workdir}\n\nGoal: ${goal}`;
+    ? `Working directory: ${workdir}\n\nGoal: ${goal}${gitSection}\n\nRevision feedback from user: ${feedback}\n\nPlease revise your plan to address this feedback.`
+    : `Working directory: ${workdir}\n\nGoal: ${goal}${gitSection}`;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: PLANNER_SYSTEM },

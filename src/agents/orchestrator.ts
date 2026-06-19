@@ -1,7 +1,14 @@
 import { readFileSync } from 'fs';
+import { resolve, relative } from 'path';
 import { runPlanner, type Plan } from './planner.js';
 import { runExecutor } from './executor.js';
-import { uiStream } from '../ui/stream.js';
+import { uiStream, type UIEvent } from '../ui/stream.js';
+import {
+  getGitContext,
+  createSessionBranch,
+  commitFile,
+  generatePRDescription,
+} from '../git/client.js';
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
 
@@ -24,6 +31,9 @@ export async function runOrchestrator(
   workdir: string,
   sessionId: string,
 ): Promise<void> {
+  // Fetch git context once — injected into the planner for project awareness.
+  const gitCtx = await getGitContext(workdir).catch(() => null);
+
   // ── Simple path ──────────────────────────────────────────────────────────────
   if (!isComplex(request)) {
     const plan: Plan = {
@@ -42,14 +52,13 @@ export async function runOrchestrator(
     return;
   }
 
-  // ── Complex path: planner → approval gate → executor ────────────────────────
+  // ── Complex path: planner → approval gate → branch → executor ────────────────
   let feedback: string | undefined;
   let plan: Plan;
 
   for (;;) {
-    // Promise.all scaffold kept for future concurrent exploration tasks.
     const [planPath] = await Promise.all([
-      runPlanner(request, workdir, sessionId, feedback),
+      runPlanner(request, workdir, sessionId, feedback, gitCtx),
     ]);
 
     plan = JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
@@ -64,16 +73,62 @@ export async function runOrchestrator(
       return;
     }
 
-    // answer === 'revise' — re-run planner with feedback
     feedback = response.feedback;
     uiStream.push({ type: 'phase', phase: 'planning' });
   }
 
+  // Create session branch before the executor touches any files.
+  let branchName: string | null = null;
+  try {
+    branchName = await createSessionBranch(workdir, sessionId);
+    uiStream.push({ type: 'branch_created', branchName });
+  } catch (err) {
+    // Non-fatal — git may not be initialized, or another issue. Continue anyway.
+    uiStream.push({ type: 'error', message: `Branch creation failed: ${(err as Error).message}` });
+  }
+
+  // Per-file git commit listener, serialized via a promise chain.
+  let commitQueue = Promise.resolve();
+  const planRef = plan!;
+
+  const handleFileModified = (event: UIEvent): void => {
+    if (event.type !== 'file_modified') return;
+    const filepath = event.path;
+
+    commitQueue = commitQueue.then(async () => {
+      try {
+        const rel = relative(workdir, filepath);
+        const isNew = planRef.filesToCreate.some(f => resolve(workdir, f) === filepath);
+        const message = `feat: ${isNew ? 'add' : 'update'} ${rel}`;
+        const hash = await commitFile(workdir, filepath, message);
+        uiStream.push({ type: 'file_committed', filepath, message, commitHash: hash });
+      } catch (err) {
+        // Git commit failure is logged but not fatal — the file is still on disk.
+        uiStream.push({ type: 'error', message: `git commit failed: ${(err as Error).message}` });
+      }
+    });
+  };
+
+  uiStream.on('event', handleFileModified);
+
   uiStream.push({ type: 'phase', phase: 'executing' });
-  const report = await runExecutor(plan!, workdir, sessionId);
+  const report = await runExecutor(planRef, workdir, sessionId);
+
+  // Drain the commit queue before post-session steps.
+  await commitQueue;
+  uiStream.off('event', handleFileModified);
+
   reportEscalations(report.escalations);
 
-  if (report.success) {
+  if (report.success && branchName) {
+    try {
+      const prPath = await generatePRDescription(sessionId, workdir);
+      uiStream.push({ type: 'pr_description_ready', path: prPath });
+      uiStream.ensureDone(`All steps completed. PR description → ${prPath}`);
+    } catch (err) {
+      uiStream.ensureDone('All steps completed successfully.');
+    }
+  } else {
     uiStream.ensureDone('All steps completed successfully.');
   }
 }

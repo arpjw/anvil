@@ -14,7 +14,11 @@ export type UIEvent =
   | { type: 'approval_needed' }
   | { type: 'file_modified'; path: string }
   | { type: 'done'; summary: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'branch_created'; branchName: string }
+  | { type: 'file_committed'; filepath: string; message: string; commitHash: string }
+  | { type: 'pr_description_ready'; path: string }
+  | { type: 'rollback_complete'; filesRestored: string[] };
 
 class UIStream extends EventEmitter {
   private _done = false;

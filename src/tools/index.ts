@@ -5,6 +5,9 @@ import { textSearch } from './text_search.js';
 import { writeFile } from './write_file.js';
 import { astSearch } from './ast_search.js';
 import { findSymbol } from './find_symbol.js';
+import { gitLog } from './git_log.js';
+import { gitDiff } from './git_diff.js';
+import { gitBlame } from './git_blame.js';
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -110,6 +113,57 @@ export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'git_log',
+      description: 'Show recent git commit history with file-change summaries. Use this to understand what changed recently in the project before making modifications.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workdir: { type: 'string', description: 'Repository root directory' },
+          limit: { type: 'number', description: 'Number of commits to show (default: 10)' },
+        },
+        required: ['workdir'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_diff',
+      description: 'Show the unified diff of current staged or unstaged changes. Use this when the request references "current changes", "what I just did", or "my edits".',
+      parameters: {
+        type: 'object',
+        properties: {
+          workdir: { type: 'string', description: 'Repository root directory' },
+          mode: {
+            type: 'string',
+            enum: ['staged', 'unstaged', 'all'],
+            description: 'Which changes to show (default: all)',
+          },
+        },
+        required: ['workdir'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_blame',
+      description: 'Show who last modified each line in a file range, including commit hash, author, date, and commit message. Use this to understand the history and intent behind a section of code.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filepath: { type: 'string', description: 'Path to the file (absolute or relative to workdir)' },
+          line_start: { type: 'number', description: '1-indexed first line of the range' },
+          line_end: { type: 'number', description: '1-indexed last line of the range' },
+          workdir: { type: 'string', description: 'Repository root (optional; used to resolve relative paths)' },
+        },
+        required: ['filepath', 'line_start', 'line_end'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'done',
       description: 'Call this when the task is fully complete. Provide a concise summary of every change made.',
       parameters: {
@@ -183,6 +237,23 @@ export async function executeTool(
       );
     case 'find_symbol':
       return findSymbol(args.symbol as string, args.file as string, workdir);
+    case 'git_log':
+      return gitLog(
+        (args.workdir as string | undefined) ?? workdir,
+        args.limit as number | undefined,
+      );
+    case 'git_diff':
+      return gitDiff(
+        (args.workdir as string | undefined) ?? workdir,
+        args.mode as 'staged' | 'unstaged' | 'all' | undefined,
+      );
+    case 'git_blame':
+      return gitBlame(
+        args.filepath as string,
+        args.line_start as number,
+        args.line_end as number,
+        (args.workdir as string | undefined) ?? workdir,
+      );
     default:
       return `Unknown tool: ${name}`;
   }
