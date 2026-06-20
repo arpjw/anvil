@@ -12,6 +12,7 @@ export interface LoopOptions {
 
 export async function runStreamingLoop(
   client: OpenAI,
+  model: string,
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   tools: OpenAI.Chat.ChatCompletionTool[],
   executeToolFn: ToolExecutorFn,
@@ -24,7 +25,7 @@ export async function runStreamingLoop(
     iterations++;
 
     const stream = await client.chat.completions.create({
-      model: 'claude-sonnet-4-6',
+      model,
       messages,
       tools,
       tool_choice: 'auto',

@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import { runOrchestrator } from '../agents/orchestrator.js';
@@ -18,6 +19,8 @@ export async function runHeadless(
   request: string,
   workdir: string,
   noVerify = false,
+  client?: OpenAI,
+  modelId?: string,
 ): Promise<HeadlessResult> {
   const sessionId = randomUUID();
   const absWorkdir = resolve(workdir);
@@ -110,7 +113,7 @@ export async function runHeadless(
   uiStream.on('event', handleEvent);
 
   try {
-    await runOrchestrator(request, absWorkdir, sessionId, { noVerify });
+    await runOrchestrator(request, absWorkdir, sessionId, { noVerify, client, modelId });
   } finally {
     uiStream.off('event', handleEvent);
   }

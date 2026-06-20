@@ -1,0 +1,46 @@
+name: Anvil AI Code Fix
+
+on:
+  pull_request:
+
+jobs:
+  anvil-fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install anvil-agent
+        run: npm install -g anvil-agent
+
+      - name: Run Anvil to fix TypeScript type errors
+        id: anvil
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          anvil --headless "fix any TypeScript type errors" .
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push changes
+        if: steps.anvil.outputs.exit_code == '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: anvil auto-fix TypeScript type errors [skip ci]"
+            git push origin HEAD:${{ github.head_ref }}
+          fi

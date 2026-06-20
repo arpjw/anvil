@@ -365,3 +365,59 @@
 ### Next session should start with
 - Move to Phase 2: tree-sitter integration for ast_search
 - Integrate typescript-language-server for find_symbol and get_diagnostics
+
+## Session 11+12 — June 19, 2026
+**Phase:** 11 (Distribution) + 12 (Model Picker)
+**Duration:** ~2h
+
+### What was accomplished
+**Phase 11 — Distribution:**
+- Built src/setup/lsp.ts: language detection, LSP install check,
+  prompt + install, persists to ~/.anvil/lsp.json
+- Built src/setup/config.ts: ~/.anvil/config.json, loadConfig/saveConfig,
+  config set/get/list, API key precedence chain
+- Built src/setup/init.ts: interactive anvil init, creates all 6 .anvil/
+  files, --yes flag for non-interactive defaults
+- Built src/setup/doctor.ts: 8 checks (Node, API key, rg, LSPs, /tmp,
+  disk, git, bun optional), exit 0/1
+- Built src/setup/commands.ts: loads .anvil/commands/*.md, resolves
+  /commandName to system prompt + request
+- package.json: anvil-agent, v1.0.0, engines, files, build scripts
+- .github/workflows/anvil-ci-example.yml and Dockerfile
+- README.md: npm install -g anvil-agent, init/doctor workflow
+
+**Phase 12 — Model Picker:**
+- Added ModelSpec type and AVAILABLE_MODELS (9 models: Anthropic,
+  OpenAI, Google, Moonshot) to src/setup/config.ts
+- selectModel(): looping @inquirer/prompts select, dim "API key not set"
+  labels, re-prompts on missing key
+- buildClient(): Anthropic → api.anthropic.com/v1, all others →
+  OpenAI-compatible SDK with provider baseURL
+- client and modelId threaded through orchestrator → planner, executor,
+  verifier, headless — all four call sites
+- --model <id> flag skips picker, validates key immediately
+- Picker runs before Ink starts — owns stdin cleanly
+- StatusBar shows: "Claude Opus 4.8 · PLANNING · 14s"
+- Backwards compatible: resume mode falls back to default Anthropic client
+
+### Decisions made
+- OpenAI SDK for all providers including Anthropic — consistent client
+  interface, all providers speak OpenAI-compatible protocol
+- Picker owns stdin before Ink takes over — avoids input conflicts
+- Fall back to default client if none passed — preserves resume mode
+- LSP state persisted to ~/.anvil/lsp.json — only prompts once per server
+- API key precedence: env var → config file → error
+
+### What broke / was surprising
+- Nothing — clean build, all verification tests passed
+
+### State of codebase at close
+- All 12 phases complete and committed in one shot
+- 9 models available across 4 providers
+- Full distribution pipeline: anvil doctor, anvil init, npm package ready
+- Model label live in status bar throughout every session
+
+### Next steps
+- Writeup at anvil.aryasomu.com
+- npm publish anvil-agent
+- Submit to Cursor

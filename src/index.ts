@@ -10,11 +10,12 @@ import { uiStream } from './ui/stream.js';
 // ── Argument parsing ───────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
-const isHeadless = argv.includes('--headless');
-const isDryRun   = argv.includes('--dry-run');
-const noVerify   = argv.includes('--no-verify');
-const isRollback = argv[0] === '--rollback';
-const isResume   = argv[0] === '--resume';
+const isHeadless    = argv.includes('--headless');
+const isDryRun      = argv.includes('--dry-run');
+const noVerify      = argv.includes('--no-verify');
+const isRollback    = argv[0] === '--rollback';
+const isResume      = argv[0] === '--resume';
+const showCommands  = argv.includes('--commands');
 
 // Extract --image <filepath>
 let imagePath: string | null = null;
@@ -23,16 +24,72 @@ if (imageIdx !== -1 && argv[imageIdx + 1] && !argv[imageIdx + 1].startsWith('--'
   imagePath = argv[imageIdx + 1];
 }
 
-// Strip flags (and image path) to leave clean positional args
+// Extract --model <id>
+let modelFlag: string | null = null;
+const modelIdx = argv.indexOf('--model');
+if (modelIdx !== -1 && argv[modelIdx + 1] && !argv[modelIdx + 1].startsWith('--')) {
+  modelFlag = argv[modelIdx + 1];
+}
+
+// Strip flags (and their values) to leave clean positional args
 const positional = argv.filter((a, i) => {
   if (a.startsWith('--')) return false;
   if (i > 0 && argv[i - 1] === '--image') return false;
+  if (i > 0 && argv[i - 1] === '--model') return false;
   return true;
 });
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+
+  // ── anvil init ───────────────────────────────────────────────────────────────
+  if (positional[0] === 'init') {
+    const workdir = resolve(positional[1] ?? process.cwd());
+    const yes = argv.includes('--yes') || argv.includes('-y');
+    const { initProject } = await import('./setup/init.js');
+    await initProject(workdir, yes);
+    return;
+  }
+
+  // ── anvil doctor ─────────────────────────────────────────────────────────────
+  if (positional[0] === 'doctor') {
+    const workdir = resolve(positional[1] ?? process.cwd());
+    const { runDoctor } = await import('./setup/doctor.js');
+    const exitCode = await runDoctor(workdir);
+    process.exit(exitCode);
+  }
+
+  // ── anvil config ─────────────────────────────────────────────────────────────
+  if (positional[0] === 'config') {
+    const sub = positional[1];
+    const { runConfigSet, runConfigGet, runConfigList } = await import('./setup/config.js');
+    if (sub === 'set') {
+      const key = positional[2];
+      const val = positional[3];
+      if (!key || !val) {
+        console.error('Usage: anvil config set <key> <value>');
+        process.exit(1);
+      }
+      runConfigSet(key, val);
+      return;
+    }
+    if (sub === 'get') {
+      const key = positional[2];
+      if (!key) {
+        console.error('Usage: anvil config get <key>');
+        process.exit(1);
+      }
+      runConfigGet(key);
+      return;
+    }
+    if (sub === 'list' || !sub) {
+      runConfigList();
+      return;
+    }
+    console.error(`Unknown config subcommand "${sub}". Use set, get, or list.`);
+    process.exit(1);
+  }
 
   // ── Rollback mode ────────────────────────────────────────────────────────────
   if (isRollback) {
@@ -92,6 +149,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  // ── --commands flag ──────────────────────────────────────────────────────────
+  if (showCommands) {
+    const workdir = resolve(positional[0] ?? process.cwd());
+    const { loadCommands, printCommands } = await import('./setup/commands.js');
+    const commands = await loadCommands(workdir);
+    printCommands(commands);
+    return;
+  }
+
   // ── Help ─────────────────────────────────────────────────────────────────────
   const request = positional[0];
 
@@ -99,25 +165,97 @@ async function main(): Promise<void> {
     console.error('Usage: anvil "<request>" [workdir] [flags]');
     console.error('       workdir defaults to the current directory');
     console.error('\nExample: anvil "add error handling to main.ts"');
+    console.error('\nCommands:');
+    console.error('  anvil init                   Interactive project setup');
+    console.error('  anvil doctor                 Verify Anvil setup');
+    console.error('  anvil config list            Show all config values');
+    console.error('  anvil config set <key> <v>   Set a config value');
+    console.error('  anvil config get <key>       Get a config value');
     console.error('\nFlags:');
+    console.error('  --model <id>             Select model (skips picker)');
     console.error('  --rollback <sessionId>   Revert all changes from a session');
     console.error('  --resume <sessionId>     Resume a previously interrupted session');
     console.error('  --image <filepath>       Attach an image as context (PNG/JPG/WebP/GIF)');
     console.error('  --headless               No TUI — output JSON result to stdout');
     console.error('  --dry-run                Plan only — print plan, do not execute');
     console.error('  --no-verify              Skip post-execution verification pass');
-    console.error('\nEnv: ANTHROPIC_API_KEY must be set');
-    process.exit(1);
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('Error: ANTHROPIC_API_KEY environment variable is not set');
+    console.error('  --commands               List available slash commands');
+    console.error('\nEnv: API key for the selected model must be set');
     process.exit(1);
   }
 
   const workdirArg = positional[1];
   const workdir    = resolve(workdirArg ?? process.cwd());
-  const sessionId  = randomUUID();
+
+  // ── Slash command resolution ─────────────────────────────────────────────────
+  let resolvedRequest = request;
+  let systemPrompt: string | undefined;
+
+  if (request.startsWith('/')) {
+    const { loadCommands, resolveSlashCommand } = await import('./setup/commands.js');
+    const commands = await loadCommands(workdir);
+    const resolved = resolveSlashCommand(request, commands);
+    if (resolved) {
+      resolvedRequest = resolved.request;
+      systemPrompt = resolved.systemPrompt;
+    } else {
+      const name = request.split(/\s+/)[0].slice(1);
+      console.error(`Unknown slash command "/${name}". Run "anvil --commands" to list available commands.`);
+      process.exit(1);
+    }
+  }
+
+  // ── LSP auto-install ─────────────────────────────────────────────────────────
+  if (!isDryRun && !isHeadless) {
+    const { promptAndInstall } = await import('./setup/lsp.js');
+    await promptAndInstall(workdir);
+  }
+
+  // ── Model selection ───────────────────────────────────────────────────────────
+  const { AVAILABLE_MODELS, selectModel, buildClient } = await import('./setup/config.js');
+
+  let modelId: string;
+  let modelLabel: string;
+  let apiKey: string;
+  let baseURL: string | null;
+
+  if (modelFlag) {
+    // --model flag provided: skip picker, validate immediately
+    const spec = AVAILABLE_MODELS.find(m => m.id === modelFlag);
+    if (!spec) {
+      const ids = AVAILABLE_MODELS.map(m => m.id).join(', ');
+      console.error(`Unknown model "${modelFlag}". Available: ${ids}`);
+      process.exit(1);
+    }
+    apiKey = process.env[spec.envKey] ?? '';
+    if (!apiKey) {
+      console.error(`${spec.envKey} is not set. Required for model ${spec.id}.`);
+      process.exit(1);
+    }
+    modelId = spec.id;
+    modelLabel = spec.label;
+    baseURL = spec.baseURL;
+  } else if (isHeadless || isDryRun) {
+    // Non-interactive modes: use config default, no picker
+    const { loadConfig } = await import('./setup/config.js');
+    const cfg = loadConfig();
+    const spec = AVAILABLE_MODELS.find(m => m.id === cfg.model) ?? AVAILABLE_MODELS[0];
+    apiKey = process.env[spec.envKey] ?? process.env.ANTHROPIC_API_KEY ?? '';
+    modelId = spec.id;
+    modelLabel = spec.label;
+    baseURL = spec.baseURL;
+  } else {
+    // TUI mode: interactive picker
+    const result = await selectModel();
+    modelId = result.modelId;
+    modelLabel = result.modelLabel;
+    apiKey = result.apiKey;
+    baseURL = result.baseURL;
+  }
+
+  const client = buildClient(modelId, baseURL, apiKey);
+
+  const sessionId = randomUUID();
 
   // Load image if provided
   let imageBlock = null;
@@ -135,7 +273,7 @@ async function main(): Promise<void> {
   if (isHeadless) {
     const { runHeadless } = await import('./execution/headless.js');
     try {
-      const result = await runHeadless(request, workdir, noVerify);
+      const result = await runHeadless(resolvedRequest, workdir, noVerify, client, modelId);
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       process.exit(result.success && result.verificationPassed ? 0 : 1);
     } catch (err) {
@@ -151,7 +289,7 @@ async function main(): Promise<void> {
     const { runDryRun } = await import('./agents/orchestrator.js');
     const { checkEditSize } = await import('./execution/guard.js');
     try {
-      const plan = await runDryRun(request, workdir, sessionId);
+      const plan = await runDryRun(resolvedRequest, workdir, sessionId);
       console.log('=== DRY RUN — NO FILES TOUCHED ===\n');
       console.log(`Goal: ${plan.goal}`);
       if (plan.context) console.log(`\nContext:\n  ${plan.context}`);
@@ -185,11 +323,18 @@ async function main(): Promise<void> {
 
   // ── Normal TUI mode ───────────────────────────────────────────────────────────
   const { unmount } = render(
-    React.createElement(App, { request, workdir, sessionId }),
+    React.createElement(App, { request: resolvedRequest, workdir, sessionId, modelLabel }),
   );
 
   try {
-    await runAgent(request, workdir, sessionId, { noVerify, image: imageBlock });
+    await runAgent(resolvedRequest, workdir, sessionId, {
+      noVerify,
+      image: imageBlock,
+      systemPrompt,
+      client,
+      modelId,
+      modelLabel,
+    });
     uiStream.ensureDone();
     await new Promise(r => setTimeout(r, 500));
     unmount();

@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { readFileSync } from 'fs';
 import { resolve, relative, join } from 'path';
 import { runPlanner, type Plan } from './planner.js';
@@ -14,6 +15,7 @@ import { runVerification } from '../execution/verifier.js';
 import { checkEditSize } from '../execution/guard.js';
 import { registerInterruptHandler } from '../execution/interrupt.js';
 import type { ImageContentBlock } from '../context/image.js';
+import { AVAILABLE_MODELS, loadConfig } from '../setup/config.js';
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
 
@@ -33,6 +35,10 @@ export interface OrchestratorOptions {
   noVerify?: boolean;
   headless?: boolean;
   image?: ImageContentBlock | null;
+  systemPrompt?: string;
+  client?: OpenAI;
+  modelId?: string;
+  modelLabel?: string;
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -43,7 +49,14 @@ export async function runOrchestrator(
   sessionId: string,
   options: OrchestratorOptions = {},
 ): Promise<void> {
-  const { noVerify = false, headless = false, image = null } = options;
+  const { noVerify = false, headless = false, image = null, systemPrompt, client, modelId } = options;
+
+  // Resolve effective client and model — fall back to config if not provided by caller.
+  const effectiveModelId = modelId ?? loadConfig().model;
+  const effectiveSpec = AVAILABLE_MODELS.find(m => m.id === effectiveModelId) ?? AVAILABLE_MODELS[0];
+  const effectiveApiKey = process.env[effectiveSpec.envKey] ?? process.env.ANTHROPIC_API_KEY ?? '';
+  const effectiveBaseURL = effectiveSpec.baseURL ?? 'https://api.anthropic.com/v1';
+  const effectiveClient = client ?? new OpenAI({ apiKey: effectiveApiKey, baseURL: effectiveBaseURL });
 
   // ── Step 1: Load all context before anything else ────────────────────────────
   const ctx = await loadContext(request, workdir);
@@ -58,7 +71,10 @@ export async function runOrchestrator(
     memoryLoaded: ctx.memory !== null,
   });
 
-  const contextSection = buildContextSection(ctx);
+  const baseContext = buildContextSection(ctx);
+  const contextSection = systemPrompt
+    ? `## Slash Command Instructions\n\n${systemPrompt}\n\n${baseContext || ''}`
+    : baseContext;
   const { ignorePatterns } = ctx;
 
   // Use cleanRequest (mentions stripped) for everything downstream
@@ -87,13 +103,13 @@ export async function runOrchestrator(
 
     uiStream.on('event', captureDone);
     uiStream.push({ type: 'phase', phase: 'executing' });
-    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns);
+    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
     uiStream.off('event', captureDone);
 
     reportEscalations(report.escalations);
 
     if (!noVerify) {
-      const verResult = await runVerification(workdir, sessionId, plan, ignorePatterns);
+      const verResult = await runVerification(workdir, sessionId, plan, ignorePatterns, effectiveClient, effectiveModelId);
       if (verResult.passed) {
         await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
       } else {
@@ -119,7 +135,7 @@ export async function runOrchestrator(
         memory: ctx.memory,
         ignorePatterns,
         image,
-      }),
+      }, effectiveClient, effectiveModelId),
     ]);
 
     plan = JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
@@ -191,7 +207,7 @@ export async function runOrchestrator(
   uiStream.on('event', captureDone);
 
   uiStream.push({ type: 'phase', phase: 'executing' });
-  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns);
+  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
 
   // Drain the commit queue before post-session steps.
   await commitQueue;
@@ -203,7 +219,7 @@ export async function runOrchestrator(
   // ── Verification ─────────────────────────────────────────────────────────────
   let verificationPassed = true;
   if (!noVerify) {
-    const verResult = await runVerification(workdir, sessionId, planRef, ignorePatterns);
+    const verResult = await runVerification(workdir, sessionId, planRef, ignorePatterns, effectiveClient, effectiveModelId);
     verificationPassed = verResult.passed;
     if (!verResult.passed) {
       reportVerificationFailure(verResult.rounds, verResult.remainingFailures);

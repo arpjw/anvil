@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { runCommand } from '../tools/run_command.js';
@@ -83,6 +84,8 @@ export async function runVerification(
   sessionId: string,
   plan: Plan,
   ignorePatterns?: string[],
+  client?: OpenAI,
+  modelId?: string,
 ): Promise<VerificationResult> {
   uiStream.push({ type: 'verification_start' });
 
@@ -100,7 +103,7 @@ export async function runVerification(
       ...failures,
     ].join('\n');
 
-    await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction);
+    await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction, client, modelId);
 
     ({ passed, failures } = await check(workdir));
 

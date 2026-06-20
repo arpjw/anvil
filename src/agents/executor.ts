@@ -34,11 +34,14 @@ export async function runExecutor(
   sessionId: string,
   ignorePatterns?: string[],
   extraContext?: string,
+  client?: OpenAI,
+  modelId?: string,
 ): Promise<ExecutorReport> {
-  const client = new OpenAI({
+  const effectiveClient = client ?? new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
     baseURL: 'https://api.anthropic.com/v1',
   });
+  const effectiveModelId = modelId ?? 'claude-sonnet-4-6';
 
   // Build the set of allowed absolute paths from the plan.
   // Empty set means no restriction (used for simple pass-through plans).
@@ -59,7 +62,7 @@ export async function runExecutor(
 
   const escalations: string[] = [];
 
-  await runStreamingLoop(client, messages, executorTools, async (name, args) => {
+  await runStreamingLoop(effectiveClient, effectiveModelId, messages, executorTools, async (name, args) => {
     if (name === 'read_file' && hasRestriction) {
       const abs = resolve(workdir, args.path as string);
       if (!allowedSet.has(abs)) {

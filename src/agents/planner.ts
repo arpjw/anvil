@@ -103,11 +103,14 @@ export async function runPlanner(
   feedback?: string,
   gitCtx?: GitContext | null,
   anvilCtx?: PlannerAnvilCtx,
+  client?: OpenAI,
+  modelId?: string,
 ): Promise<string> {
-  const client = new OpenAI({
+  const effectiveClient = client ?? new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
     baseURL: 'https://api.anthropic.com/v1',
   });
+  const effectiveModelId = modelId ?? 'claude-sonnet-4-6';
 
   // Build dynamic system prompt: base + project rules if present
   let systemPrompt = BASE_PLANNER_SYSTEM;
@@ -164,7 +167,7 @@ export async function runPlanner(
 
   const ignorePatterns = anvilCtx?.ignorePatterns;
 
-  await runStreamingLoop(client, messages, plannerTools, async (name, args) => {
+  await runStreamingLoop(effectiveClient, effectiveModelId, messages, plannerTools, async (name, args) => {
     if (name === 'write_plan') {
       mkdirSync(planDir, { recursive: true });
       writeFileSync(planPath, JSON.stringify(args, null, 2), 'utf-8');

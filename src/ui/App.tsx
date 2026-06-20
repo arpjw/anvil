@@ -200,9 +200,10 @@ export interface AppProps {
   request: string;
   workdir: string;
   sessionId: string;
+  modelLabel?: string;
 }
 
-export function App({ request, workdir, sessionId }: AppProps) {
+export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -562,7 +563,7 @@ export function App({ request, workdir, sessionId }: AppProps) {
         </Box>
       )}
 
-      <StatusBar phase={phase} startTime={startTime} verification={verification} />
+      <StatusBar phase={phase} startTime={startTime} verification={verification} modelLabel={modelLabel} />
     </Box>
   );
 }

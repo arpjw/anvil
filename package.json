@@ -1,6 +1,6 @@
 {
-  "name": "anvil",
-  "version": "0.1.0",
+  "name": "anvil-agent",
+  "version": "1.0.0",
   "description": "A terminal-based AI coding agent",
   "type": "module",
   "bin": {
@@ -8,11 +8,20 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "tsc --outDir dist && chmod +x dist/index.js",
     "start": "node dist/index.js",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "dependencies": {
+    "@inquirer/prompts": "^8.5.2",
     "@types/figlet": "^1.7.0",
     "@types/micromatch": "^4.0.10",
     "@types/react": "^19.2.17",
