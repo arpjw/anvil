@@ -1,7 +1,21 @@
-# Anvil Project Rules
+# Anvil Rules
 
-- Always use `const` over `let` where possible.
-- Never modify `utils.ts` directly — it is a shared utility file used across the entire project. Propose changes in a separate PR instead.
-- All error messages must include the function name as a prefix (e.g., `"createUser: invalid email"`).
-- Session expiry must be enforced in `auth.ts`, not in the calling code.
-- Database queries must go through the functions in `db.ts` — no raw SQL or direct client access elsewhere.
+## Off-limits directories
+
+- node_modules
+- dist
+- .git
+
+## Test command
+
+`npm test`
+
+## Style
+
+*(no style rules specified)*
+
+## Defaults
+
+- Never modify lock files.
+- Always preserve existing comments unless explicitly asked to remove them.
+- Prefer editing existing files over creating new ones.
