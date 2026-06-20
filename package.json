@@ -1,6 +1,6 @@
 {
   "name": "anvil-agent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A terminal-based AI coding agent",
   "type": "module",
   "bin": {
