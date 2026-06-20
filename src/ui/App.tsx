@@ -7,8 +7,10 @@ import { uiStream, type UIEvent, type Phase } from './stream.js';
 import { ToolCall } from './components/ToolCall.js';
 import { ShadowCycle } from './components/ShadowCycle.js';
 import { PlanDisplay } from './components/PlanDisplay.js';
-import { StatusBar } from './components/StatusBar.js';
+import { StatusBar, type VerificationState } from './components/StatusBar.js';
+import { DiffView } from './components/DiffView.js';
 import type { Plan } from '../agents/planner.js';
+import type { FileDiff } from '../diff/engine.js';
 
 const HEADER = figlet.textSync('ANVIL', { font: 'Small' }) as string;
 
@@ -17,17 +19,26 @@ const HEADER = figlet.textSync('ANVIL', { font: 'Small' }) as string;
 let _uid = 0;
 const uid = () => ++_uid;
 
-type ToolItem   = { kind: 'tool';   id: number; name: string; args: string; result?: string };
-type ShadowItem = { kind: 'shadow'; id: number; file: string; attempt: number; maxAttempts: number; outcome?: 'committed' | 'retry' | 'escalated'; errorCount?: number };
-type TextItem   = { kind: 'text';   id: number; text: string; color?: string };
-type PhaseItem  = { kind: 'phase';  id: number; label: string };
-type DisplayItem = ToolItem | ShadowItem | TextItem | PhaseItem;
+type ToolItem    = { kind: 'tool';    id: number; name: string; args: string; result?: string };
+type ShadowItem  = { kind: 'shadow';  id: number; file: string; attempt: number; maxAttempts: number; outcome?: 'committed' | 'retry' | 'escalated'; errorCount?: number };
+type TextItem    = { kind: 'text';    id: number; text: string; color?: string };
+type PhaseItem   = { kind: 'phase';   id: number; label: string };
+type CommandItem = { kind: 'command'; id: number; command: string; exitCode?: number };
+type DisplayItem = ToolItem | ShadowItem | TextItem | PhaseItem | CommandItem;
 
 // ── Approval state ────────────────────────────────────────────────────────────
 
 interface ApprovalState {
   feedbackMode: boolean;
   text: string;
+}
+
+// ── Diff state ────────────────────────────────────────────────────────────────
+
+interface DiffState {
+  filepath: string;
+  diff: FileDiff;
+  hunkCount: number;
 }
 
 // ── Left panel ────────────────────────────────────────────────────────────────
@@ -130,7 +141,6 @@ function LeftPanel({
 }
 
 // ── Item renderer ─────────────────────────────────────────────────────────────
-// Keys are set by the caller (in the .map() below), not here.
 
 function renderItem(item: DisplayItem): JSX.Element {
   switch (item.kind) {
@@ -165,6 +175,22 @@ function renderItem(item: DisplayItem): JSX.Element {
           <Text color={item.color as never}>{item.text}</Text>
         </Box>
       );
+    case 'command': {
+      const icon = item.exitCode === undefined ? '▶' :
+        item.exitCode === 0 ? '✓' : '✖';
+      const iconColor = item.exitCode === undefined ? 'yellow' :
+        item.exitCode === 0 ? 'green' : 'red';
+      const label = item.command.length > 52 ? item.command.slice(0, 52) + '…' : item.command;
+      return (
+        <Box gap={1}>
+          <Text color={iconColor as never}>{icon}</Text>
+          <Text dimColor>{label}</Text>
+          {item.exitCode !== undefined && (
+            <Text dimColor>exit {item.exitCode}</Text>
+          )}
+        </Box>
+      );
+    }
   }
 }
 
@@ -182,12 +208,38 @@ export function App({ request, workdir, sessionId }: AppProps) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [filesModified, setFilesModified] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
+  const [diffState, setDiffState] = useState<DiffState | null>(null);
+  const [interruptActive, setInterruptActive] = useState(false);
   const [startTime] = useState(() => Date.now());
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [commitCount, setCommitCount] = useState(0);
   const [prPath, setPrPath] = useState<string | null>(null);
   const [contextSources, setContextSources] = useState<ContextSources | null>(null);
   const [memoryWritten, setMemoryWritten] = useState(false);
+  const [verification, setVerification] = useState<VerificationState | undefined>(undefined);
+
+  const handleDiffDone = useCallback((acceptedIndices: Set<number>) => {
+    if (!diffState) return;
+    const total = diffState.hunkCount;
+    const accepted = acceptedIndices.size;
+    const rejected = total - accepted;
+    uiStream.resolveDiff(acceptedIndices, diffState.filepath, total);
+    setDiffState(null);
+
+    if (accepted === 0) {
+      setItems(prev => [...prev, {
+        kind: 'text', id: uid(),
+        text: `${basename(diffState.filepath)}: skipped by user`,
+        color: 'yellow',
+      }]);
+    } else {
+      setItems(prev => [...prev, {
+        kind: 'text', id: uid(),
+        text: `${basename(diffState.filepath)}: ${accepted} hunk${accepted !== 1 ? 's' : ''} accepted, ${rejected} rejected`,
+        color: 'green',
+      }]);
+    }
+  }, [diffState]);
 
   const handleEvent = useCallback((event: UIEvent) => {
     switch (event.type) {
@@ -235,6 +287,52 @@ export function App({ request, workdir, sessionId }: AppProps) {
         });
         break;
 
+      case 'command_running':
+        setItems(prev => [...prev, { kind: 'command', id: uid(), command: event.command }]);
+        break;
+
+      case 'command_complete':
+        setItems(prev => {
+          const next = [...prev];
+          for (let i = next.length - 1; i >= 0; i--) {
+            const it = next[i];
+            if (it.kind === 'command' && it.command === event.command && it.exitCode === undefined) {
+              next[i] = { ...it, exitCode: event.exitCode };
+              break;
+            }
+          }
+          return next;
+        });
+        break;
+
+      case 'verification_start':
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: '⟳ verification: type check + tests…',
+          color: 'yellow',
+        }]);
+        break;
+
+      case 'verification_pass': {
+        const label = event.rounds === 0
+          ? '✓ verified'
+          : `✓ verified after ${event.rounds} auto-fix round${event.rounds > 1 ? 's' : ''}`;
+        setVerification({ passed: true, rounds: event.rounds, failures: [] });
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: label, color: 'green' }]);
+        break;
+      }
+
+      case 'verification_fail':
+        setVerification({ passed: false, rounds: 2, failures: event.failures });
+        setItems(prev => [
+          ...prev,
+          { kind: 'text', id: uid(), text: `✖ verification failed — ${event.failures.length} issue(s)`, color: 'red' },
+          ...event.failures.slice(0, 5).map(f => ({
+            kind: 'text' as const, id: uid(), text: `  ${f.slice(0, 80)}`, color: 'red',
+          })),
+        ]);
+        break;
+
       case 'plan_ready':
         setPlan(event.plan);
         break;
@@ -258,7 +356,7 @@ export function App({ request, workdir, sessionId }: AppProps) {
         break;
 
       case 'model_text':
-        break; // reasoning text not shown in the activity log
+        break;
 
       case 'branch_created':
         setGitBranch(event.branchName);
@@ -306,6 +404,34 @@ export function App({ request, workdir, sessionId }: AppProps) {
           color: 'cyan',
         }]);
         break;
+
+      case 'diff_ready':
+        setDiffState({ filepath: event.filepath, diff: event.diff, hunkCount: event.hunkCount });
+        break;
+
+      case 'interrupt_requested':
+        setInterruptActive(true);
+        break;
+
+      case 'interrupt_resolved':
+        setInterruptActive(false);
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `↯ interrupt: ${event.action}`,
+          color: event.action === 'continue' ? 'green' : event.action === 'stop' ? 'yellow' : 'red',
+        }]);
+        break;
+
+      case 'session_resumed':
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `↺ resumed session ${event.sessionId.slice(0, 8)}`,
+          color: 'cyan',
+        }]);
+        break;
+
+      case 'diff_resolved':
+        break; // handled inline in handleDiffDone
     }
   }, []);
 
@@ -317,6 +443,17 @@ export function App({ request, workdir, sessionId }: AppProps) {
   const { isRawModeSupported } = useStdin();
 
   useInput((input, key) => {
+    // DiffView handles its own input when active
+    if (diffState) return;
+
+    // Interrupt prompt
+    if (interruptActive) {
+      if (input === 'c') { uiStream.resolveInterrupt('continue'); setInterruptActive(false); }
+      else if (input === 's') { uiStream.resolveInterrupt('stop'); setInterruptActive(false); }
+      else if (input === 'r') { uiStream.resolveInterrupt('rollback'); setInterruptActive(false); }
+      return;
+    }
+
     if (!approval) return;
 
     if (approval.feedbackMode) {
@@ -371,23 +508,29 @@ export function App({ request, workdir, sessionId }: AppProps) {
           />
         </Box>
 
-        {/* Right panel — live activity log */}
+        {/* Right panel — live activity log or diff view */}
         <Box
           flexGrow={1}
           flexDirection="column"
           borderStyle="single"
-          borderColor="gray"
+          borderColor={diffState ? 'cyan' : 'gray'}
           paddingX={1}
         >
-          {recentItems.length === 0
-            ? <Text dimColor>Waiting to start…</Text>
-            : recentItems.map(item => <Box key={item.id}>{renderItem(item)}</Box>)
+          {diffState
+            ? <DiffView
+                filepath={diffState.filepath}
+                diff={diffState.diff}
+                onDone={handleDiffDone}
+              />
+            : recentItems.length === 0
+              ? <Text dimColor>Waiting to start…</Text>
+              : recentItems.map(item => <Box key={item.id}>{renderItem(item)}</Box>)
           }
         </Box>
       </Box>
 
-      {/* Plan + approval gate (only during the y/n/revise prompt) */}
-      {plan && approval && (
+      {/* Plan + approval gate */}
+      {plan && approval && !diffState && (
         <Box flexDirection="column" paddingX={1}>
           <PlanDisplay plan={plan} />
           <Box paddingX={1} paddingY={1}>
@@ -409,7 +552,17 @@ export function App({ request, workdir, sessionId }: AppProps) {
         </Box>
       )}
 
-      <StatusBar phase={phase} startTime={startTime} />
+      {/* Interrupt prompt */}
+      {interruptActive && !diffState && (
+        <Box paddingX={1} paddingY={1} gap={2}>
+          <Text color="yellow">↯ Interrupt received.</Text>
+          <Text><Text color="green" bold>[c]</Text> continue</Text>
+          <Text><Text color="yellow" bold>[s]</Text> stop</Text>
+          <Text><Text color="red" bold>[r]</Text> rollback</Text>
+        </Box>
+      )}
+
+      <StatusBar phase={phase} startTime={startTime} verification={verification} />
     </Box>
   );
 }

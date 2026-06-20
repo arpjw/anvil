@@ -3,6 +3,57 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session 10 — June 19, 2026
+**Phase:** 10 — Edit Quality
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/diff/engine.ts: generateDiff (wraps diff npm package), 
+  applySelectedHunks (partial hunk reconstruction)
+- Built src/ui/components/DiffView.tsx: j/k hunk nav, a/r per-hunk, 
+  A/R all, q/Enter done, colored +/- lines
+- Built src/execution/interrupt.ts: first Ctrl+C shows c/s/r prompt, 
+  second Ctrl+C force-rollbacks
+- Built src/execution/resume.ts: reads plan.json + shadow.log, 
+  reconstructs remaining steps, re-runs executor
+- Built src/execution/guard.ts: token estimate (chars/4), warns >50k tokens
+- Built src/context/image.ts: validates PNG/JPG/WebP/GIF, base64-encodes, 
+  returns Anthropic-compatible block
+- shadow/workspace.ts: after LSP clean, emits diff_ready, awaits hunk 
+  selection, applies applySelectedHunks before committing
+- App.tsx: DiffView replaces right panel on diff_ready, interrupt prompt 
+  renders below panels
+- headless.ts: auto-accepts all hunks on diff_ready
+- index.ts: --resume <sessionId>, --image <filepath>, size estimate in dry-run
+
+### Decisions made
+- waitForDiffResolution/resolveDiff mirror the waitForApproval pattern — 
+  consistent Promise-based UI gate across all blocking interactions
+- applySelectedHunks reconstructs file from partial selection — 
+  rejected hunk regions preserve original content exactly
+- Second Ctrl+C force-rollbacks without prompt — prevents hanging in CI 
+  or when user is stuck
+- Image converted to OpenAI data-URL format in planner — 
+  works with Anthropic's vision API via the OpenAI-compatible endpoint
+
+### What broke / was surprising
+- 14 files touched — most complex session so far, no major breakage
+
+### State of codebase at close
+- All edit quality features complete: diff view, per-hunk accept/reject,
+  graceful interrupt, session resume, edit size guard, multimodal input
+- headless mode correctly bypasses all interactive gates
+- src/diff/, src/execution/interrupt.ts, src/execution/resume.ts, 
+  src/execution/guard.ts, src/context/image.ts all new and wired in
+
+### Next session should start with
+- Phase 11: Distribution
+- Compiled binary via bun build --compile
+- npm package as anvil-agent
+- Auto LSP install on first run
+- anvil init, anvil doctor, anvil config
+- GitHub Actions integration
+
 ---
 
 ## Session Template

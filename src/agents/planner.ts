@@ -5,6 +5,7 @@ import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
 import { uiStream } from '../ui/stream.js';
 import type { GitContext } from '../git/client.js';
+import type { ImageContentBlock } from '../context/image.js';
 
 export interface Plan {
   goal: string;
@@ -21,6 +22,7 @@ export interface PlannerAnvilCtx {
   rules?: string | null;
   memory?: string | null;
   ignorePatterns?: string[];
+  image?: ImageContentBlock | null;
 }
 
 const SHADOW_BASE = '/tmp/anvil';
@@ -87,7 +89,8 @@ Exploration workflow:
 When you have a complete picture of what needs to change and why, call write_plan with all 7 fields fully populated. Be specific: list every file that will be touched, every step the executor must take, and every risk.`;
 
 // Planner gets all read-only tools plus the write_plan terminal tool.
-const PLANNER_READONLY = new Set(['write_file']);
+// Execution tools are executor-only.
+const PLANNER_READONLY = new Set(['write_file', 'run_command', 'run_tests']);
 const plannerTools = [
   ...toolDefinitions.filter(t => !PLANNER_READONLY.has(t.function.name)),
   WRITE_PLAN_TOOL,
@@ -133,7 +136,20 @@ export async function runPlanner(
     contextParts.push(`\n\nRevision feedback from user: ${feedback}\n\nPlease revise your plan to address this feedback.`);
   }
 
-  const userContent = contextParts.join('');
+  const textContent = contextParts.join('');
+
+  // Build user message: prepend image block if provided (OpenAI-compat format)
+  const userContent: OpenAI.Chat.ChatCompletionUserMessageParam['content'] = anvilCtx?.image
+    ? [
+        {
+          type: 'image_url' as const,
+          image_url: {
+            url: `data:${anvilCtx.image.source.media_type};base64,${anvilCtx.image.source.data}`,
+          },
+        },
+        { type: 'text' as const, text: textContent },
+      ]
+    : textContent;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     console.log('=== Cycle 1: broken content ===');
     console.log(brokenContent);
 
-    const r1 = await shadowWrite(SESSION, TEST_FILE, brokenContent, WORKDIR);
+    const r1 = await shadowWrite(SESSION, TEST_FILE, '', brokenContent, WORKDIR);
     console.log(`clean      : ${r1.clean}`);
     console.log('diagnostics:');
     for (const d of r1.diagnostics) {
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     console.log('=== Cycle 2: fixed content ===');
     console.log(fixedContent);
 
-    const r2 = await shadowWrite(SESSION, TEST_FILE, fixedContent, WORKDIR);
+    const r2 = await shadowWrite(SESSION, TEST_FILE, brokenContent, fixedContent, WORKDIR);
     console.log(`clean      : ${r2.clean}`);
     if (r2.diagnostics.length > 0) {
       console.log('unexpected diagnostics:');

@@ -1,11 +1,8 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { shadowWrite, commitToReal, formatDiagnostics } from '../shadow/workspace.js';
+import { shadowWrite, commitContent, formatDiagnostics } from '../shadow/workspace.js';
 import { uiStream } from '../ui/stream.js';
 
-// Per-session, per-file retry counter. Tracks how many times write_file has
-// been called for a given file without clean diagnostics, so we can escalate
-// after MAX_RETRIES failed attempts.
 const retryCounters = new Map<string, number>();
 const MAX_RETRIES = 3;
 
@@ -23,17 +20,29 @@ export async function writeFile(
 
   uiStream.push({ type: 'shadow_attempt', file: fullPath, attempt, maxAttempts: MAX_RETRIES });
 
+  // Read original content before writing (empty string for new files).
+  let originalContent = '';
+  try {
+    if (existsSync(fullPath)) originalContent = readFileSync(fullPath, 'utf-8');
+  } catch { /* treat as empty */ }
+
   let result;
   try {
     mkdirSync(dirname(fullPath), { recursive: true });
-    result = await shadowWrite(sessionId, fullPath, content, workdir);
+    result = await shadowWrite(sessionId, fullPath, originalContent, content, workdir);
   } catch (err) {
     return `Error writing ${path}: ${(err as Error).message}`;
   }
 
   if (result.clean) {
     retryCounters.delete(retryKey);
-    await commitToReal(sessionId, fullPath);
+
+    if (result.allRejected) {
+      uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: 0, outcome: 'committed' });
+      return `User rejected all changes to ${path} — file unchanged.`;
+    }
+
+    commitContent(fullPath, result.finalContent);
     uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: 0, outcome: 'committed' });
     uiStream.push({ type: 'file_modified', path: fullPath });
     const tag = attempt > 1 ? ` (self-corrected on attempt ${attempt})` : '';

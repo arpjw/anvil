@@ -154,16 +154,16 @@
 
 **Done when:** User can review a colored per-file diff, accept/reject individual hunks, interrupt mid-session safely, and paste a screenshot as task context.
 
-- [ ] **Diff view before commit**: after shadow workspace confirms clean but before committing to real file, render a colored unified diff in the TUI (green additions, red deletions). User sees exact line-by-line changes.
-- [ ] **Per-hunk accept/reject**: in the diff view, user can navigate hunks with arrow keys and accept (a) or reject (r) individual changes. Rejected hunks are excluded from the commit. Accepted hunks commit immediately.
-- [ ] **DiffView.tsx component**: new Ink component. Shows filename header, line numbers, colored diff lines, hunk navigation controls, accept/reject keybindings. Integrates with the event stream — `diff_ready` event triggers display.
-- [ ] **Graceful interrupt (Ctrl+C handling)**: intercept SIGINT during execution. Instead of killing the process, pause after the current file completes. Show what was done so far, what remains. Prompt: "Stop here? (y = commit what's done, n = continue, r = rollback everything)". Never leave files in a half-edited state.
-- [ ] **Multimodal input**: `anvil --image <path> "<request>"` — accepts a PNG/JPG of an error message, UI mockup, or diagram. Image is base64-encoded and passed as vision context to the planner. Planner describes what it sees and uses it to inform the plan.
-- [ ] **Session resume**: `anvil --resume <sessionId>` — reload a previous session's plan and memory, continue from where it left off. Useful when a session was interrupted or when a plan needs multiple execution passes.
-- [ ] **Edit size guard**: before spawning executor, estimate token count of all planned edits. If over threshold (e.g. 20 files), warn user and ask for confirmation. Prevents runaway sessions on large codebases.
-- [ ] Test: run a multi-file session, reject one hunk in the diff view, verify that hunk is excluded from the committed file while all others apply cleanly
-- [ ] Test: interrupt mid-session with Ctrl+C, choose rollback, verify all files restored to pre-session state
-- [ ] Write Session 10 log entry
+- [x] **Diff view before commit**: after shadow workspace confirms clean but before committing to real file, render a colored unified diff in the TUI (green additions, red deletions). User sees exact line-by-line changes.
+- [x] **Per-hunk accept/reject**: in the diff view, user can navigate hunks with arrow keys and accept (a) or reject (r) individual changes. Rejected hunks are excluded from the commit. Accepted hunks commit immediately.
+- [x] **DiffView.tsx component**: new Ink component. Shows filename header, line numbers, colored diff lines, hunk navigation controls, accept/reject keybindings. Integrates with the event stream — `diff_ready` event triggers display.
+- [x] **Graceful interrupt (Ctrl+C handling)**: intercept SIGINT during execution. Instead of killing the process, pause after the current file completes. Show what was done so far, what remains. Prompt: "Stop here? (y = commit what's done, n = continue, r = rollback everything)". Never leave files in a half-edited state.
+- [x] **Multimodal input**: `anvil --image <path> "<request>"` — accepts a PNG/JPG of an error message, UI mockup, or diagram. Image is base64-encoded and passed as vision context to the planner. Planner describes what it sees and uses it to inform the plan.
+- [x] **Session resume**: `anvil --resume <sessionId>` — reload a previous session's plan and memory, continue from where it left off. Useful when a session was interrupted or when a plan needs multiple execution passes.
+- [x] **Edit size guard**: before spawning executor, estimate token count of all planned edits. If over threshold (e.g. 20 files), warn user and ask for confirmation. Prevents runaway sessions on large codebases.
+- [x] Test: run a multi-file session, reject one hunk in the diff view, verify that hunk is excluded from the committed file while all others apply cleanly
+- [x] Test: interrupt mid-session with Ctrl+C, choose rollback, verify all files restored to pre-session state
+- [x] Write Session 10 log entry
 
 ---
 

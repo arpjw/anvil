@@ -10,6 +10,10 @@ import {
   generatePRDescription,
 } from '../git/client.js';
 import { loadContext, buildContextSection, appendMemory } from '../context/index.js';
+import { runVerification } from '../execution/verifier.js';
+import { checkEditSize } from '../execution/guard.js';
+import { registerInterruptHandler } from '../execution/interrupt.js';
+import type { ImageContentBlock } from '../context/image.js';
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
 
@@ -25,13 +29,22 @@ function isComplex(request: string): boolean {
   return new Set(fileMentions).size >= 2;
 }
 
+export interface OrchestratorOptions {
+  noVerify?: boolean;
+  headless?: boolean;
+  image?: ImageContentBlock | null;
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
 export async function runOrchestrator(
   request: string,
   workdir: string,
   sessionId: string,
+  options: OrchestratorOptions = {},
 ): Promise<void> {
+  const { noVerify = false, headless = false, image = null } = options;
+
   // ── Step 1: Load all context before anything else ────────────────────────────
   const ctx = await loadContext(request, workdir);
 
@@ -78,7 +91,19 @@ export async function runOrchestrator(
     uiStream.off('event', captureDone);
 
     reportEscalations(report.escalations);
-    await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
+
+    if (!noVerify) {
+      const verResult = await runVerification(workdir, sessionId, plan, ignorePatterns);
+      if (verResult.passed) {
+        await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
+      } else {
+        reportVerificationFailure(verResult.rounds, verResult.remainingFailures);
+      }
+    } else {
+      await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
+    }
+
+    uiStream.ensureDone('All steps completed successfully.');
     return;
   }
 
@@ -93,6 +118,7 @@ export async function runOrchestrator(
         rules: ctx.rules,
         memory: ctx.memory,
         ignorePatterns,
+        image,
       }),
     ]);
 
@@ -110,6 +136,25 @@ export async function runOrchestrator(
 
     feedback = response.feedback;
     uiStream.push({ type: 'phase', phase: 'planning' });
+  }
+
+  // Guard: warn if the edit is very large.
+  const guard = checkEditSize(plan!, workdir);
+  if (guard.isLarge) {
+    if (headless) {
+      console.warn(`[anvil] Large edit detected: ~${guard.tokenEstimate} tokens across ${guard.fileCount} files. Proceeding automatically.`);
+    } else {
+      // In TUI mode, surface the warning in the activity log — user already approved the plan.
+      uiStream.push({
+        type: 'error',
+        message: `Large edit: ~${guard.tokenEstimate} tokens across ${guard.fileCount} files. Proceeding as approved.`,
+      });
+    }
+  }
+
+  // Register interrupt handler for TUI sessions.
+  if (!headless) {
+    registerInterruptHandler(sessionId, workdir);
   }
 
   // Create session branch before the executor touches any files.
@@ -155,20 +200,66 @@ export async function runOrchestrator(
 
   reportEscalations(report.escalations);
 
-  await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
-
-  if (report.success && branchName) {
-    try {
-      const prPath = await generatePRDescription(sessionId, workdir);
-      uiStream.push({ type: 'pr_description_ready', path: prPath });
-      uiStream.ensureDone(`All steps completed. PR description → ${prPath}`);
-    } catch (err) {
-      uiStream.ensureDone('All steps completed successfully.');
+  // ── Verification ─────────────────────────────────────────────────────────────
+  let verificationPassed = true;
+  if (!noVerify) {
+    const verResult = await runVerification(workdir, sessionId, planRef, ignorePatterns);
+    verificationPassed = verResult.passed;
+    if (!verResult.passed) {
+      reportVerificationFailure(verResult.rounds, verResult.remainingFailures);
     }
-  } else {
-    uiStream.ensureDone('All steps completed successfully.');
   }
+
+  if (verificationPassed) {
+    await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
+    if (report.success && branchName) {
+      try {
+        const prPath = await generatePRDescription(sessionId, workdir);
+        uiStream.push({ type: 'pr_description_ready', path: prPath });
+      } catch { /* non-fatal */ }
+    }
+  }
+  // If verification failed, skip memory and PR — session is incomplete.
+
+  uiStream.ensureDone('All steps completed.');
 }
+
+// ── Dry-run mode ──────────────────────────────────────────────────────────────
+
+export async function runDryRun(
+  request: string,
+  workdir: string,
+  sessionId: string,
+): Promise<Plan> {
+  const ctx = await loadContext(request, workdir);
+  const cleanRequest = ctx.cleanRequest || request;
+  const { ignorePatterns } = ctx;
+
+  if (!isComplex(cleanRequest)) {
+    return {
+      goal: cleanRequest,
+      context: 'Single-file request — planner skipped (simple path).',
+      filesToModify: [],
+      filesToCreate: [],
+      steps: [cleanRequest],
+      verificationCriteria: [],
+      risks: [],
+    };
+  }
+
+  const gitCtx = await getGitContext(workdir).catch(() => null);
+
+  const planPath = await runPlanner(cleanRequest, workdir, sessionId, undefined, gitCtx, {
+    contextSection: buildContextSection(ctx) || undefined,
+    rules: ctx.rules,
+    memory: ctx.memory,
+    ignorePatterns,
+  });
+
+  return JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function maybeAppendMemory(
   workdir: string,
@@ -190,4 +281,14 @@ function reportEscalations(escalations: string[]): void {
   for (const e of escalations) {
     uiStream.push({ type: 'error', message: e });
   }
+}
+
+function reportVerificationFailure(rounds: number, remainingFailures: string[]): void {
+  const roundLabel = rounds === 1 ? '1 fix round' : `${rounds} fix rounds`;
+  const issueCount = remainingFailures.length;
+  const issueLabel = issueCount === 1 ? '1 issue' : `${issueCount} issues`;
+  uiStream.push({
+    type: 'error',
+    message: `Verification failed after ${roundLabel}: ${issueLabel} remain. Session not saved to memory.`,
+  });
 }
