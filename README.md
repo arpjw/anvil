@@ -80,42 +80,42 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ```bash
 cd your-project
-anvil init         # interactive setup: languages, ignore dirs, test command
-anvil doctor       # verify everything is installed and configured
+anvilai init         # interactive setup: languages, ignore dirs, test command
+anvilai doctor       # verify everything is installed and configured
 ```
 
 **Run**
 
 ```bash
-anvil "<request>" <path/to/workdir>
+anvilai "<request>" <path/to/workdir>
 ```
 
 Examples:
 
 ```bash
-anvil "Add a JSDoc comment to fetchUser" ./my-project
-anvil "Rename the User type to Account across all files" ./my-project
+anvilai "Add a JSDoc comment to fetchUser" ./my-project
+anvilai "Rename the User type to Account across all files" ./my-project
 ```
 
 For complex multi-file requests, Anvil will run the Planner first and show you the full plan before asking `y / n / revise`.
 
 **Slash commands**
 
-After `anvil init`, three starter commands are available in `.anvil/commands/`:
+After `anvilai init`, three starter commands are available in `.anvil/commands/`:
 
 ```bash
-anvil /review .              # review codebase for bugs and type issues
-anvil /document src/auth.ts  # add JSDoc to exported functions
-anvil /test .                # write unit tests for uncovered functions
-anvil --commands             # list all available slash commands
+anvilai /review .              # review codebase for bugs and type issues
+anvilai /document src/auth.ts  # add JSDoc to exported functions
+anvilai /test .                # write unit tests for uncovered functions
+anvilai --commands             # list all available slash commands
 ```
 
 **Config**
 
 ```bash
-anvil config list                        # show all settings
-anvil config set model claude-opus-4-7   # change the model
-anvil config get model                   # read a single value
+anvilai config list                        # show all settings
+anvilai config set model claude-opus-4-7   # change the model
+anvilai config get model                   # read a single value
 ```
 
 **Alternative: run from source**

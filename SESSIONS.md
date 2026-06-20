@@ -92,7 +92,7 @@
 - Compiled binary via bun build --compile
 - npm package as anvil-agent
 - Auto LSP install on first run
-- anvil init, anvil doctor, anvil config
+- anvilai init, anvilai doctor, anvilai config
 - GitHub Actions integration
 
 ---
