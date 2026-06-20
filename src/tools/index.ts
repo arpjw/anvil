@@ -8,6 +8,9 @@ import { findSymbol } from './find_symbol.js';
 import { gitLog } from './git_log.js';
 import { gitDiff } from './git_diff.js';
 import { gitBlame } from './git_blame.js';
+import { runCommand } from './run_command.js';
+import { runTests } from './run_tests.js';
+import { uiStream } from '../ui/stream.js';
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -202,6 +205,43 @@ export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description:
+        'Execute a shell command in the working directory and capture its output. ' +
+        'Use for build steps, linting, compiling, or any shell operation required by the plan. ' +
+        'Output is capped at 20 000 chars combined.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+          workdir: { type: 'string', description: 'Working directory override (defaults to project workdir)' },
+          timeout_seconds: { type: 'number', description: 'Timeout in seconds (default: 30)' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_tests',
+      description:
+        'Run the project test suite and return structured results. ' +
+        'Auto-detects the runner (jest, vitest, pytest, cargo, go test). ' +
+        'Use after making changes to verify correctness.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workdir: { type: 'string', description: 'Working directory override (defaults to project workdir)' },
+          filter: { type: 'string', description: 'Filter to run specific test file or test name' },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 export async function executeTool(
@@ -257,6 +297,46 @@ export async function executeTool(
         args.line_end as number,
         (args.workdir as string | undefined) ?? workdir,
       );
+    case 'run_command': {
+      const cmd = args.command as string;
+      const dir = (args.workdir as string | undefined) ?? workdir;
+      const timeout = args.timeout_seconds as number | undefined;
+      uiStream.push({ type: 'command_running', command: cmd, workdir: dir });
+      const result = await runCommand(cmd, dir, timeout);
+      uiStream.push({
+        type: 'command_complete',
+        command: cmd,
+        exitCode: result.exitCode,
+        stdoutPreview: result.stdout.slice(0, 200),
+      });
+      const parts: string[] = [];
+      if (result.timedOut) parts.push(`[TIMED OUT after ${timeout ?? 30}s]`);
+      parts.push(`exit code: ${result.exitCode}`);
+      if (result.stdout) parts.push(`stdout:\n${result.stdout}`);
+      if (result.stderr) parts.push(`stderr:\n${result.stderr}`);
+      return parts.join('\n');
+    }
+    case 'run_tests': {
+      const dir = (args.workdir as string | undefined) ?? workdir;
+      const result = await runTests(dir, args.filter as string | undefined);
+      if (!result.runner) return 'No test runner detected in this project.';
+      const lines: string[] = [
+        `Runner: ${result.runner}`,
+        `Tests: ${result.passedTests} passed | ${result.failedTests} failed | ${result.skippedTests} skipped (${result.totalTests} total)`,
+        result.passed ? '✓ All tests passed' : `✗ ${result.failedTests} test(s) failed`,
+      ];
+      if (result.failingTests.length > 0) {
+        lines.push('\nFailing tests:');
+        for (const t of result.failingTests) {
+          lines.push(`  - ${t.name}${t.file ? ` (${t.file})` : ''}`);
+        }
+      }
+      if (!result.passed) {
+        lines.push('\nRaw output (last 2000 chars):');
+        lines.push(result.rawOutput.slice(-2000));
+      }
+      return lines.join('\n');
+    }
     default:
       return `Unknown tool: ${name}`;
   }

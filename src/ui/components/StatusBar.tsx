@@ -15,7 +15,21 @@ function elapsed(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-export function StatusBar({ phase, startTime }: { phase: Phase; startTime: number }) {
+export interface VerificationState {
+  passed: boolean;
+  rounds: number;
+  failures: string[];
+}
+
+export function StatusBar({
+  phase,
+  startTime,
+  verification,
+}: {
+  phase: Phase;
+  startTime: number;
+  verification?: VerificationState;
+}) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -23,10 +37,25 @@ export function StatusBar({ phase, startTime }: { phase: Phase; startTime: numbe
     return () => clearInterval(t);
   }, []);
 
+  let verLabel: string | null = null;
+  let verColor: string | null = null;
+  if (verification) {
+    if (verification.passed) {
+      verLabel = verification.rounds === 0 ? '✓ verified' : `✓ verified (${verification.rounds}x fix)`;
+      verColor = 'green';
+    } else {
+      verLabel = `✖ ${verification.failures.length} failure${verification.failures.length !== 1 ? 's' : ''}`;
+      verColor = 'red';
+    }
+  }
+
   return (
     <Box borderStyle="single" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Text dimColor>claude-sonnet-4-6</Text>
       <Text color={PHASE_COLORS[phase]} bold>{phase.toUpperCase()}</Text>
+      {verLabel && verColor && (
+        <Text color={verColor as never} bold>{verLabel}</Text>
+      )}
       <Text dimColor>{elapsed(now - startTime)}</Text>
     </Box>
   );

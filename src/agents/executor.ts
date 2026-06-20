@@ -19,19 +19,21 @@ Execution rules:
 - If write_file returns TypeScript errors, fix them and retry (you have up to 3 attempts per file)
 - If write_file returns an ESCALATION message, note it and continue to the next step
 - Only read files that are listed in the plan's filesToModify or filesToCreate
-- When all steps are complete, stop`;
+- Use run_command to execute shell commands (e.g. build steps, linting) when the plan requires it
+- Use run_tests to verify the test suite passes after your changes
+- When all steps are complete, call done`;
 
-// Executor gets read_file, write_file, and done.
-const readFileDef = toolDefinitions.find(t => t.function.name === 'read_file')!;
-const writeFileDef = toolDefinitions.find(t => t.function.name === 'write_file')!;
-const doneDef = toolDefinitions.find(t => t.function.name === 'done')!;
-const executorTools = [readFileDef, writeFileDef, doneDef];
+// Executor tools: read_file, write_file, run_command, run_tests, done
+const executorTools = ['read_file', 'write_file', 'run_command', 'run_tests', 'done']
+  .map(name => toolDefinitions.find(t => t.function.name === name)!)
+  .filter(Boolean);
 
 export async function runExecutor(
   plan: Plan,
   workdir: string,
   sessionId: string,
   ignorePatterns?: string[],
+  extraContext?: string,
 ): Promise<ExecutorReport> {
   const client = new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -47,9 +49,12 @@ export async function runExecutor(
   const hasRestriction = allowedSet.size > 0;
 
   const planText = JSON.stringify(plan, null, 2);
+  const baseContent = `Working directory: ${workdir}\n\nApproved plan:\n${planText}`;
+  const userContent = extraContext ? `${baseContent}\n\n${extraContext}` : baseContent;
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: EXECUTOR_SYSTEM },
-    { role: 'user', content: `Working directory: ${workdir}\n\nApproved plan:\n${planText}` },
+    { role: 'user', content: userContent },
   ];
 
   const escalations: string[] = [];
@@ -72,7 +77,7 @@ export async function runExecutor(
     }
 
     return { result };
-  });
+  }, 20, { suppressDoneEvent: !!extraContext });
 
   return { success: escalations.length === 0, escalations };
 }

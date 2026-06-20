@@ -3,6 +3,47 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session 9 — June 19, 2026
+**Phase:** 9 — Execution Environment
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/tools/run_command.ts: execa subprocess, blocked-command list
+  (rm -rf /, sudo, mkfs, dd, curl|sh, wget|sh), 20k combined output cap,
+  configurable timeout
+- Built src/tools/run_tests.ts: auto-detects jest/vitest/pytest/cargo/go test
+  from project config, returns structured pass/fail/skip counts + failing test names
+- Built src/execution/verifier.ts: post-execution tsc + run_tests pass;
+  on failure spawns a new executor with error output as context; max 2 auto-fix rounds
+- Built src/execution/headless.ts: no-TUI JSON mode, auto-approves plan,
+  exits 0 on success / 1 on failure, structured result to stdout
+- Updated src/tools/index.ts: registered run_command + run_tests tool definitions
+  and executeTool cases; emits command_running / command_complete events
+- Updated src/agents/executor.ts: added run_command + run_tests to executor tool set,
+  extraContext param for verification re-runs, suppressDoneEvent option
+- Updated src/agents/loop.ts: LoopOptions interface, suppressDoneEvent flag
+- Updated src/ui/components/StatusBar.tsx: VerificationState type, shows
+  ✓ verified / ✖ N failures in the status bar after verification runs
+- --headless and --dry-run flags wired in index.ts (via orchestrator)
+
+### Decisions made
+- Verification capped at 2 auto-fix rounds to prevent infinite loops
+- run_command blocked list uses regex patterns, not exact strings — covers
+  common destructive variants without being exhaustive
+- suppressDoneEvent lets verification re-run executor without double-firing done
+
+### State of codebase at close
+- Full execution environment: run_command, run_tests, post-exec verification,
+  headless mode, dry-run mode, command output in TUI status bar
+- verifier.ts runs tsc then test suite; on failure re-runs executor with
+  failure context injected
+
+### Next session should start with
+- Phase 10: Edit Quality (diff view, per-hunk accept/reject, interrupt handler,
+  session resume, multimodal input, edit size guard)
+
+---
+
 ## Session 10 — June 19, 2026
 **Phase:** 10 — Edit Quality
 **Duration:** ~1h

@@ -6,12 +6,17 @@ export type ToolExecutorFn = (
   args: Record<string, unknown>,
 ) => Promise<{ result: string; done?: boolean }>;
 
+export interface LoopOptions {
+  suppressDoneEvent?: boolean;
+}
+
 export async function runStreamingLoop(
   client: OpenAI,
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   tools: OpenAI.Chat.ChatCompletionTool[],
   executeToolFn: ToolExecutorFn,
   maxIterations = 20,
+  options: LoopOptions = {},
 ): Promise<void> {
   let iterations = 0;
 
@@ -71,7 +76,9 @@ export async function runStreamingLoop(
 
       if (tc.name === 'done') {
         const summary = (args.summary as string) ?? '';
-        uiStream.push({ type: 'done', summary });
+        if (!options.suppressDoneEvent) {
+          uiStream.push({ type: 'done', summary });
+        }
         break outer;
       }
 

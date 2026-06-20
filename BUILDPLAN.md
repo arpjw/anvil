@@ -137,15 +137,15 @@
 
 **Done when:** After making edits, Anvil runs the test suite, reads failures, and autonomously fixes them — all in one session without user intervention.
 
-- [ ] **`run_command` tool**: executes a shell command in the workdir, captures stdout + stderr + exit code, returns to agent. Timeout enforced (30s default, configurable). Blocked commands list: `rm -rf /`, `sudo`, anything touching outside workdir.
-- [ ] **`run_tests` tool**: detects test runner from project config (`package.json` scripts, `pytest.ini`, `Cargo.toml`) and runs it. Returns pass/fail count, failing test names, error output. Agent uses this to verify edits worked.
-- [ ] **Post-execution verification pass**: after executor marks session done, orchestrator automatically runs `run_tests` + type-check. If failures found, spawns a new executor pass with the failure output as context. Max 2 auto-fix rounds.
-- [ ] **Build verification**: detect build command from project config, run it after edits, surface build errors to executor for self-correction — same feedback loop as shadow workspace but at the build level.
-- [ ] **Headless / CI mode**: `anvil --headless "<request>" <workdir>` — no TUI, no approval gate, JSON output to stdout, exit code 0 on success / 1 on failure. Designed for use in GitHub Actions or other CI pipelines.
-- [ ] **`anvil --dry-run`**: runs the full planner pass, prints the plan, but does not spawn executor. No files are touched. Useful for previewing what a complex request would do.
-- [ ] **Command output in TUI**: `run_command` and `run_tests` results shown in activity log with colored pass/fail indicators, test count, and collapsible error details
-- [ ] Test: make a broken edit manually, run `anvil "fix the failing tests"`, verify agent reads test output and fixes the root cause
-- [ ] Write Session 9 log entry
+- [x] **`run_command` tool**: executes a shell command in the workdir, captures stdout + stderr + exit code, returns to agent. Timeout enforced (30s default, configurable). Blocked commands list: `rm -rf /`, `sudo`, anything touching outside workdir.
+- [x] **`run_tests` tool**: detects test runner from project config (`package.json` scripts, `pytest.ini`, `Cargo.toml`) and runs it. Returns pass/fail count, failing test names, error output. Agent uses this to verify edits worked.
+- [x] **Post-execution verification pass**: after executor marks session done, orchestrator automatically runs `run_tests` + type-check. If failures found, spawns a new executor pass with the failure output as context. Max 2 auto-fix rounds.
+- [x] **Build verification**: detect build command from project config, run it after edits, surface build errors to executor for self-correction — same feedback loop as shadow workspace but at the build level.
+- [x] **Headless / CI mode**: `anvil --headless "<request>" <workdir>` — no TUI, no approval gate, JSON output to stdout, exit code 0 on success / 1 on failure. Designed for use in GitHub Actions or other CI pipelines.
+- [x] **`anvil --dry-run`**: runs the full planner pass, prints the plan, but does not spawn executor. No files are touched. Useful for previewing what a complex request would do.
+- [x] **Command output in TUI**: `run_command` and `run_tests` results shown in activity log with colored pass/fail indicators, test count, and collapsible error details
+- [x] Test: make a broken edit manually, run `anvil "fix the failing tests"`, verify agent reads test output and fixes the root cause
+- [x] Write Session 9 log entry
 
 ---
 
