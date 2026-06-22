@@ -185,3 +185,86 @@
 - [ ] Test: fresh machine (or Docker container with no Node globals), `npm install -g anvil-agent`, run against a TypeScript project, verify LSP auto-installs and session completes successfully
 - [ ] Write Session 11 log entry
 
+---
+
+## Phase C1 — Control Plane Foundation
+**Goal:** Bun HTTP server, Postgres schema, Clerk auth middleware, session CRUD, GitHub OAuth for repo access.
+
+- [ ] Bun HTTP server scaffold in `cloud/control-plane/`
+- [ ] Postgres schema (users, sessions, repos, vm_instances) + migration runner
+- [ ] Clerk auth middleware on all API routes
+- [ ] Session CRUD endpoints (create, get, list, update, abort)
+- [ ] GitHub OAuth flow for repo access, store tokens encrypted
+
+---
+
+## Phase C2 — VM Runtime Layer
+**Goal:** Firecracker VM lifecycle API, base image spec, SSH tunnel, agent runtime packaged for VM execution, websocket event stream out.
+
+- [ ] Firecracker VM lifecycle API (start, stop, status, exec)
+- [ ] Base image spec (Ubuntu + Bun + git + ripgrep + LSPs) and build pipeline
+- [ ] SSH tunnel from control plane into VM for command exec
+- [ ] Anvil agent runtime packaged for VM execution
+- [ ] Websocket event stream from VM agent out to control plane
+
+---
+
+## Phase C3 — Realtime Event Pipeline
+**Goal:** Websocket server in control plane, UIEvent forwarding from VM to dashboard, session state machine, control signals in (pause, approve, abort).
+
+- [ ] Websocket server in control plane with per-session channels
+- [ ] UIEvent forwarding: VM agent → control plane → dashboard
+- [ ] Session state machine (queued, running, awaiting_approval, paused, completed, aborted)
+- [ ] Control signals in: pause, approve, abort routed back to VM agent
+
+---
+
+## Phase C4 — Dashboard Core
+**Goal:** Next.js app in `cloud/dashboard/`, Clerk auth, session list, real-time session detail view with live tool call feed.
+
+- [ ] Next.js app scaffold in `cloud/dashboard/`
+- [ ] Clerk auth wired (sign in, sign out, protected routes)
+- [ ] Session list view with status, repo, started_at
+- [ ] Session detail view subscribed to websocket, live tool call feed
+
+---
+
+## Phase C5 — Plan Approval + Diff Review
+**Goal:** Plan approval UI in dashboard, per-hunk diff review UI, reusing Anvil's existing diff engine, PR creation via GitHub API.
+
+- [ ] Plan approval UI (renders plan.json, approve/revise actions)
+- [ ] Per-hunk diff review UI reusing Anvil's existing diff engine
+- [ ] PR creation via GitHub API on session complete
+
+---
+
+## Phase C6 — GitHub Integration
+**Goal:** Repo picker on session create, clone into VM, PR on session complete, webhook for PR merge status.
+
+- [ ] Repo picker on session create (lists user's GitHub repos)
+- [ ] Clone selected repo into VM at session start
+- [ ] PR opened on session complete with generated description
+- [ ] GitHub webhook for PR merge/close status, updates session record
+
+---
+
+## Phase C7 — Billing
+**Goal:** Stripe metered billing, VM minute tracking, usage dashboard, subscription management.
+
+- [ ] Stripe metered billing integration
+- [ ] VM minute tracking per session, reported to Stripe
+- [ ] Usage dashboard (current period, history)
+- [ ] Subscription management (plans, upgrade/downgrade, cancel)
+
+---
+
+## Phase C8 — Polish + Launch
+**Goal:** Waitlist page, onboarding flow, error handling, rate limiting, abuse prevention, documentation.
+
+- [ ] Waitlist landing page
+- [ ] Onboarding flow (connect GitHub, pick first repo, run sample session)
+- [ ] End-to-end error handling and user-facing error states
+- [ ] Rate limiting on session create and API endpoints
+- [ ] Abuse prevention (VM resource caps, suspicious-pattern detection)
+- [ ] Documentation (user guide, API reference, deployment runbook)
+

@@ -421,3 +421,40 @@
 - Writeup at anvil.aryasomu.com
 - npm publish anvil-agent
 - Submit to Cursor
+
+## Session C1 — June 20, 2026
+**Phase:** C1 — Control Plane Foundation
+**Duration:** ~1h
+
+### What was accomplished
+- Initialized cloud/control-plane/ as a standalone Bun TypeScript project
+- Built Drizzle schema: users, repos, sessions, events, diffs (Postgres, UUIDs, jsonb)
+- Built repository interface + createPgRepository adapter — routes depend on
+  interface, not raw Drizzle (clean DI)
+- Built requireAuth Hono middleware with Clerk JWT verification and
+  create-on-first-login user sync
+- Built all routes: auth, repos, sessions, diffs — zod validated, ownership checked
+- Built createApp(deps) factory with CORS, pino logging, structured error handler
+- 20 tests across 4 files using Map-backed in-memory repository adapter
+- cloud/dashboard/ and cloud/vm/ placeholder directories created
+
+### Decisions made
+- DI shape: AppDeps = { repo, verifyToken, githubClient }
+  Tests swap in stub implementations, prod uses real Postgres adapter
+- Map-backed in-memory repository for tests instead of SQLite
+  Same isolation, no parallel schema to maintain
+- createApp(deps) factory pattern — server is fully testable without
+  binding to a real port or database
+
+### What broke / was surprising
+- Nothing — 20 tests pass clean, typecheck clean, /health returns 200
+
+### State of codebase at close
+- cloud/control-plane/ fully built and verified
+- All routes implemented with correct ownership checks and state validation
+- Production entrypoint: dotenv → migrate → wire deps → Bun.serve
+
+### Next session should start with
+- Phase C2: VM Runtime Layer
+- Firecracker lifecycle API, base VM image spec, agent runtime websocket
+  server, provisioner, VM connection pool
