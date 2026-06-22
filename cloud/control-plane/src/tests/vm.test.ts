@@ -7,7 +7,8 @@ import { provisionSession, ProvisionError } from '../vm/provisioner';
 import { containerName } from '../vm/types';
 import type { CommandResult, CommandRunner, PortWaiter, VMHandle } from '../vm/types';
 import type { AppDeps, GithubClientFactory, VerifyTokenFn } from '../lib/context';
-import { createMemoryRepository } from './harness';
+import { createMemoryRepository, FakeRedis } from './harness';
+import { SSEBroadcaster } from '../events/broadcaster';
 import type { Repo, Session, User } from '../db/schema';
 
 const silentLogger = pino({ enabled: false });
@@ -54,7 +55,9 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
       return [];
     },
   });
-  return { repo, verifyToken, githubClient };
+  const redis = new FakeRedis();
+  const broadcaster = new SSEBroadcaster(redis);
+  return { repo, verifyToken, githubClient, redis, broadcaster };
 }
 
 describe('DockerDriver.startVM', () => {

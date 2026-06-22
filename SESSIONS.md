@@ -499,3 +499,48 @@
 - Phase C3: Realtime Event Pipeline
 - SSE broadcaster, Redis pub/sub, session state machine,
   GET /sessions/:id/events endpoint
+
+## Session C3 — June 20, 2026
+**Phase:** C3 — Realtime Event Pipeline
+**Duration:** ~1h
+
+### What was accomplished
+- Built src/state/machine.ts: transition(), canTransition(), isTerminal(),
+  InvalidTransitionError. All valid transitions enforced, invalid ones throw.
+- Built src/events/pipeline.ts: processEvent persists, publishes to Redis
+  pub/sub, maps plan_ready→reviewing, done→complete, error→failed.
+  Never throws on failure, logs internally.
+- Built src/events/broadcaster.ts: SSEBroadcaster, subscribes to Redis on
+  first client, unsubscribes when empty, drops dead clients on send failure,
+  30s heartbeat
+- Built src/events/sse.ts: streamSSE handler, sends session_state with last
+  50 events as first frame, registers/unregisters with broadcaster
+- Wired: separate Redis publisher and subscriber connections, broadcaster
+  in AppDeps, GET /api/v1/sessions/:id/events route
+- event-relay.ts now routes all status updates through processEvent +
+  canTransition
+- 31 new tests across 4 files, 64/64 total passing, tsc clean
+
+### Decisions made
+- Separate ioredis connections for publisher and subscriber — Redis pub/sub
+  connections cannot be used for other commands
+- idleTimeout: 255 on SSE route — prevents Bun from timing out long-lived
+  SSE connections
+- processEvent never throws — SSE pipeline should not crash on Redis failure,
+  log and continue
+- Dead client dropped on send failure — no zombie clients accumulating
+
+### What broke / was surprising
+- Nothing — 64/64 tests pass, typecheck clean
+
+### State of codebase at close
+- Full realtime pipeline working: VM event → processEvent → Redis pub/sub
+  → SSEBroadcaster → dashboard client
+- State machine enforces all session transitions
+- SSE endpoint sends full session state as first frame (no loading state
+  needed in dashboard)
+
+### Next session should start with
+- Phase C4: Dashboard Core
+- Next.js app in cloud/dashboard/, Clerk auth, session list,
+  new session form, real-time session detail with live SSE feed

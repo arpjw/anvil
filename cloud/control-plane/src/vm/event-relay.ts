@@ -1,5 +1,8 @@
 import type { AppDeps } from '../lib/context';
 import { logger } from '../lib/logger';
+import { processEvent } from '../events/pipeline';
+import { canTransition } from '../state/machine';
+import type { SessionStatus } from '../db/schema';
 import { sessionPool, type UIEvent } from './pool';
 
 export interface EventRelaySocket {
@@ -40,7 +43,6 @@ export function startEventRelay(
   });
 
   ws.addEventListener('error', () => {
-    // close listener will follow; logger noise only
     logger.warn({ sessionId }, 'vm websocket error');
   });
 }
@@ -62,29 +64,18 @@ async function handleMessage(
   switch (msg.type) {
     case 'event': {
       const evt = msg.payload;
-      try {
-        await deps.repo.createEvent(sessionId, evt.type, evt.payload ?? null);
-      } catch (err) {
-        logger.warn({ sessionId, err }, 'failed to persist event');
-      }
+      await processEvent(deps.repo, deps.redis, sessionId, evt, { startedAt });
       sessionPool.broadcast(sessionId, evt);
       return;
     }
     case 'done': {
-      const completedAt = new Date();
-      const durationSeconds = Math.max(
-        0,
-        Math.round((completedAt.getTime() - startedAt) / 1000),
+      await processEvent(
+        deps.repo,
+        deps.redis,
+        sessionId,
+        { type: 'done', payload: msg.payload },
+        { startedAt },
       );
-      try {
-        await deps.repo.updateSessionStatus(sessionId, 'complete');
-        await deps.repo.completeSession(sessionId, {
-          completedAt,
-          durationSeconds,
-        });
-      } catch (err) {
-        logger.warn({ sessionId, err }, 'failed to mark session complete');
-      }
       sessionPool.broadcast(sessionId, {
         type: 'session_complete',
         payload: msg.payload,
@@ -92,11 +83,13 @@ async function handleMessage(
       return;
     }
     case 'error': {
-      try {
-        await deps.repo.updateSessionStatus(sessionId, 'failed');
-      } catch (err) {
-        logger.warn({ sessionId, err }, 'failed to mark session failed');
-      }
+      await processEvent(
+        deps.repo,
+        deps.redis,
+        sessionId,
+        { type: 'error', payload: msg.payload },
+        { startedAt },
+      );
       sessionPool.broadcast(sessionId, {
         type: 'session_error',
         payload: msg.payload,
@@ -104,8 +97,19 @@ async function handleMessage(
       return;
     }
     case 'aborted': {
+      await processEvent(
+        deps.repo,
+        deps.redis,
+        sessionId,
+        { type: 'aborted', payload: null },
+        { startedAt },
+      );
       try {
-        await deps.repo.updateSessionStatus(sessionId, 'aborted');
+        const session = await deps.repo.findSessionById(sessionId);
+        const current = session?.status as SessionStatus | undefined;
+        if (current && canTransition(current, 'aborted')) {
+          await deps.repo.updateSessionStatus(sessionId, 'aborted');
+        }
       } catch (err) {
         logger.warn({ sessionId, err }, 'failed to mark session aborted');
       }
@@ -113,7 +117,6 @@ async function handleMessage(
     }
     case 'ready':
     case 'setup_complete':
-      // handled by provisioner during bring-up; ignore once relay is running
       return;
     default: {
       const exhaustive: never = msg;

@@ -1,6 +1,7 @@
 import { createApp } from '../app';
 import { pino } from 'pino';
 import type { AppDeps, GithubClient, VerifyTokenFn } from '../lib/context';
+import { SSEBroadcaster } from '../events/broadcaster';
 import type {
   Repository,
   SessionDetail,
@@ -220,6 +221,16 @@ export function createMemoryRepository(): Repository & {
       return event;
     },
 
+    async getRecentEvents(sessionId, limit) {
+      const out: Event[] = [];
+      for (const e of eventsById.values()) {
+        if (e.sessionId === sessionId) out.push(e);
+      }
+      return out
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, limit);
+    },
+
     async listDiffsBySession(sessionId) {
       const out: Diff[] = [];
       for (const d of diffsById.values()) {
@@ -300,11 +311,49 @@ export type Harness = {
   tokens: TokenMap;
   github: StubbedGithub;
   deps: AppDeps;
+  redis: FakeRedis;
+  broadcaster: SSEBroadcaster;
   authedFetch: (
     path: string,
     init?: RequestInit & { token?: string },
   ) => Promise<Response>;
 };
+
+export class FakeRedis {
+  readonly published: Array<{ channel: string; message: string }> = [];
+  readonly subscribed = new Set<string>();
+  private listeners = new Set<(channel: string, message: string) => void>();
+
+  async publish(channel: string, message: string): Promise<number> {
+    this.published.push({ channel, message });
+    for (const listener of this.listeners) listener(channel, message);
+    return 1;
+  }
+
+  async subscribe(channel: string): Promise<number> {
+    this.subscribed.add(channel);
+    return this.subscribed.size;
+  }
+
+  async unsubscribe(channel: string): Promise<number> {
+    this.subscribed.delete(channel);
+    return this.subscribed.size;
+  }
+
+  on(_event: 'message', listener: (channel: string, message: string) => void): this {
+    this.listeners.add(listener);
+    return this;
+  }
+
+  off(_event: 'message', listener: (channel: string, message: string) => void): this {
+    this.listeners.delete(listener);
+    return this;
+  }
+
+  emit(channel: string, message: string): void {
+    for (const listener of this.listeners) listener(channel, message);
+  }
+}
 
 export async function readJson<T = any>(res: Response): Promise<T> {
   return (await res.json()) as T;
@@ -317,11 +366,15 @@ export function createHarness(): Harness {
     getResponses: new Map(),
     branchResponses: new Map(),
   };
+  const redis = new FakeRedis();
+  const broadcaster = new SSEBroadcaster(redis);
 
   const deps: AppDeps = {
     repo,
     verifyToken: createVerifyTokenStub(tokens),
     githubClient: createGithubStub(github),
+    redis,
+    broadcaster,
   };
 
   const app = createApp({
@@ -348,5 +401,5 @@ export function createHarness(): Harness {
     );
   };
 
-  return { app, repo, tokens, github, deps, authedFetch };
+  return { app, repo, tokens, github, deps, redis, broadcaster, authedFetch };
 }

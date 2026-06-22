@@ -8,6 +8,8 @@ import { authRoutes } from './routes/auth';
 import { reposRoutes } from './routes/repos';
 import { sessionsRoutes } from './routes/sessions';
 import { diffsRoutes } from './routes/diffs';
+import { requireAuth } from './middleware/auth';
+import { sseHandler } from './events/sse';
 
 export type CreateAppOptions = {
   deps: AppDeps;
@@ -57,6 +59,20 @@ export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
       version: '1.0.0',
       timestamp: new Date().toISOString(),
     }),
+  );
+
+  app.get(
+    '/api/v1/sessions/:id/events',
+    requireAuth(),
+    async (c) => {
+      const user = c.get('user');
+      const deps = c.get('deps');
+      const sessionId = c.req.param('id');
+      return sseHandler(c, sessionId, user.id, {
+        repo: deps.repo,
+        broadcaster: deps.broadcaster,
+      });
+    },
   );
 
   app.route('/api/v1/auth', authRoutes());

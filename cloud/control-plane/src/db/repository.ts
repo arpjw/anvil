@@ -63,6 +63,7 @@ export interface Repository {
     type: string,
     payload: unknown,
   ): Promise<Event>;
+  getRecentEvents(sessionId: string, limit: number): Promise<Event[]>;
 
   listDiffsBySession(sessionId: string): Promise<Diff[]>;
   findDiffById(id: string): Promise<Diff | null>;
@@ -264,6 +265,15 @@ export function createPgRepository(
         .returning();
       if (!row) throw new Error('failed to create event');
       return row;
+    },
+
+    async getRecentEvents(sessionId, limit) {
+      return db
+        .select()
+        .from(events)
+        .where(eq(events.sessionId, sessionId))
+        .orderBy(desc(events.createdAt))
+        .limit(limit);
     },
 
     async listDiffsBySession(sessionId) {
