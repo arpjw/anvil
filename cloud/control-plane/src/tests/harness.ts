@@ -184,6 +184,42 @@ export function createMemoryRepository(): Repository & {
       return next;
     },
 
+    async updateSessionVm(id, fields) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = {
+        ...existing,
+        vmIp: fields.vmIp,
+        vmPort: fields.vmPort,
+      };
+      sessionsById.set(id, next);
+      return next;
+    },
+
+    async completeSession(id, fields) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = {
+        ...existing,
+        completedAt: fields.completedAt,
+        durationSeconds: fields.durationSeconds,
+      };
+      sessionsById.set(id, next);
+      return next;
+    },
+
+    async createEvent(sessionId, type, payload) {
+      const event: Event = {
+        id: uuid(),
+        sessionId,
+        type,
+        payload: payload as Event['payload'],
+        createdAt: new Date(),
+      };
+      eventsById.set(event.id, event);
+      return event;
+    },
+
     async listDiffsBySession(sessionId) {
       const out: Diff[] = [];
       for (const d of diffsById.values()) {

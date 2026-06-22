@@ -50,6 +50,19 @@ export interface Repository {
   findSessionById(id: string): Promise<SessionDetail | null>;
   createSession(input: NewSession): Promise<Session>;
   updateSessionStatus(id: string, status: SessionStatus): Promise<Session>;
+  updateSessionVm(
+    id: string,
+    fields: { vmIp: string | null; vmPort: number | null },
+  ): Promise<Session>;
+  completeSession(
+    id: string,
+    fields: { completedAt: Date; durationSeconds: number },
+  ): Promise<Session>;
+  createEvent(
+    sessionId: string,
+    type: string,
+    payload: unknown,
+  ): Promise<Event>;
 
   listDiffsBySession(sessionId: string): Promise<Diff[]>;
   findDiffById(id: string): Promise<Diff | null>;
@@ -214,6 +227,42 @@ export function createPgRepository(
         .where(eq(sessions.id, id))
         .returning();
       if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async updateSessionVm(id, fields) {
+      const [row] = await db
+        .update(sessions)
+        .set({ vmIp: fields.vmIp, vmPort: fields.vmPort })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async completeSession(id, fields) {
+      const [row] = await db
+        .update(sessions)
+        .set({
+          completedAt: fields.completedAt,
+          durationSeconds: fields.durationSeconds,
+        })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async createEvent(sessionId, type, payload) {
+      const [row] = await db
+        .insert(events)
+        .values({
+          sessionId,
+          type,
+          payload: payload as Event['payload'],
+        })
+        .returning();
+      if (!row) throw new Error('failed to create event');
       return row;
     },
 

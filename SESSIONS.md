@@ -458,3 +458,44 @@
 - Phase C2: VM Runtime Layer
 - Firecracker lifecycle API, base VM image spec, agent runtime websocket
   server, provisioner, VM connection pool
+
+## Session C2 — June 20, 2026
+**Phase:** C2 — VM Runtime Layer
+**Duration:** ~1h
+
+### What was accomplished
+- Built cloud/vm/runtime/src/server.ts: WebSocket server on port 8080,
+  handles start/approve/revise/abort/setup, dynamically loads anvil-agent,
+  forwards uiStream events to control plane, exits cleanly if anvil-agent missing
+- Built cloud/vm/image/: Dockerfile (local dev), firecracker-config.template.json
+  (production), setup.sh (documented rootfs build script)
+- Built cloud/control-plane/src/vm/: VMDriver interface, DockerDriver,
+  FirecrackerDriver, getVMDriver() selector, SessionPool singleton,
+  provisionSession with 60s timeout, event-relay
+- Updated routes/sessions.ts: background provisioning (max 3/user),
+  approve/abort forward signals to VM via pool
+- Extended repository interface: createEvent, updateSessionVm, completeSession
+- 13 new tests in vm.test.ts, 33/33 total passing, tsc clean
+
+### Decisions made
+- Injectable CommandRunner and PortWaiter in runner.ts — makes Docker/Firecracker
+  drivers fully testable without real processes
+- VMDriver interface with getVMDriver() selector — swap Docker/Firecracker
+  via VM_DRIVER env var, no code changes needed
+- provisionSession has 60s timeout at every step — failure at any step
+  stops the VM and marks session failed, no orphaned VMs
+- SessionPool as singleton — single source of truth for all active connections
+
+### What broke / was surprising
+- Nothing — 33/33 tests pass, typecheck clean
+
+### State of codebase at close
+- Full VM lifecycle working: startVM, provision, event relay, stop
+- Docker driver ready for local dev smoke test
+- Firecracker driver ready for production deployment
+- cloud/vm/runtime/ packaged and ready to be built into the VM image
+
+### Next session should start with
+- Phase C3: Realtime Event Pipeline
+- SSE broadcaster, Redis pub/sub, session state machine,
+  GET /sessions/:id/events endpoint
