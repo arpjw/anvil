@@ -154,6 +154,7 @@ export function createPgRepository(
           userId: sessions.userId,
           repoId: sessions.repoId,
           status: sessions.status,
+          branch: sessions.branch,
           request: sessions.request,
           model: sessions.model,
           planJson: sessions.planJson,
@@ -180,6 +181,7 @@ export function createPgRepository(
           userId: sessions.userId,
           repoId: sessions.repoId,
           status: sessions.status,
+          branch: sessions.branch,
           request: sessions.request,
           model: sessions.model,
           planJson: sessions.planJson,
@@ -222,9 +224,20 @@ export function createPgRepository(
     },
 
     async updateSessionStatus(id, status) {
+      const patch: Partial<typeof sessions.$inferInsert> = { status };
+      if (status === 'running') {
+        const [existing] = await db
+          .select({ startedAt: sessions.startedAt })
+          .from(sessions)
+          .where(eq(sessions.id, id))
+          .limit(1);
+        if (existing && existing.startedAt === null) {
+          patch.startedAt = new Date();
+        }
+      }
       const [row] = await db
         .update(sessions)
-        .set({ status })
+        .set(patch)
         .where(eq(sessions.id, id))
         .returning();
       if (!row) throw new Error('session not found');

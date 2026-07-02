@@ -162,6 +162,7 @@ export function createMemoryRepository(): Repository & {
         userId: input.userId!,
         repoId: input.repoId!,
         status: (input.status as SessionStatus) ?? 'queued',
+        branch: input.branch ?? 'main',
         request: input.request!,
         model: input.model ?? 'claude-sonnet-4-6',
         planJson: input.planJson ?? null,
@@ -181,6 +182,9 @@ export function createMemoryRepository(): Repository & {
       const existing = sessionsById.get(id);
       if (!existing) throw new Error('session not found');
       const next: Session = { ...existing, status };
+      if (status === 'running' && existing.startedAt === null) {
+        next.startedAt = new Date();
+      }
       sessionsById.set(id, next);
       return next;
     },

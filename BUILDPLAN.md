@@ -187,45 +187,45 @@
 
 ---
 
-## Phase C1 — Control Plane Foundation
+## Phase C1 — Control Plane Foundation ✓
 **Goal:** Bun HTTP server, Postgres schema, Clerk auth middleware, session CRUD, GitHub OAuth for repo access.
 
-- [ ] Bun HTTP server scaffold in `cloud/control-plane/`
-- [ ] Postgres schema (users, sessions, repos, vm_instances) + migration runner
-- [ ] Clerk auth middleware on all API routes
-- [ ] Session CRUD endpoints (create, get, list, update, abort)
-- [ ] GitHub OAuth flow for repo access, store tokens encrypted
+- [x] Bun HTTP server scaffold in `cloud/control-plane/`
+- [x] Postgres schema (users, sessions, repos, vm_instances) + migration runner
+- [x] Clerk auth middleware on all API routes
+- [x] Session CRUD endpoints (create, get, list, update, abort)
+- [x] GitHub OAuth flow for repo access, store tokens encrypted
 
 ---
 
-## Phase C2 — VM Runtime Layer
+## Phase C2 — VM Runtime Layer ✓
 **Goal:** Firecracker VM lifecycle API, base image spec, SSH tunnel, agent runtime packaged for VM execution, websocket event stream out.
 
-- [ ] Firecracker VM lifecycle API (start, stop, status, exec)
-- [ ] Base image spec (Ubuntu + Bun + git + ripgrep + LSPs) and build pipeline
-- [ ] SSH tunnel from control plane into VM for command exec
-- [ ] Anvil agent runtime packaged for VM execution
-- [ ] Websocket event stream from VM agent out to control plane
+- [x] Firecracker VM lifecycle API (start, stop, status, exec)
+- [x] Base image spec (Ubuntu + Bun + git + ripgrep + LSPs) and build pipeline
+- [x] SSH tunnel from control plane into VM for command exec
+- [x] Anvil agent runtime packaged for VM execution
+- [x] Websocket event stream from VM agent out to control plane
 
 ---
 
-## Phase C3 — Realtime Event Pipeline
+## Phase C3 — Realtime Event Pipeline ✓
 **Goal:** Websocket server in control plane, UIEvent forwarding from VM to dashboard, session state machine, control signals in (pause, approve, abort).
 
-- [ ] Websocket server in control plane with per-session channels
-- [ ] UIEvent forwarding: VM agent → control plane → dashboard
-- [ ] Session state machine (queued, running, awaiting_approval, paused, completed, aborted)
-- [ ] Control signals in: pause, approve, abort routed back to VM agent
+- [x] Websocket server in control plane with per-session channels
+- [x] UIEvent forwarding: VM agent → control plane → dashboard
+- [x] Session state machine (queued, running, awaiting_approval, paused, completed, aborted)
+- [x] Control signals in: pause, approve, abort routed back to VM agent
 
 ---
 
-## Phase C4 — Dashboard Core
+## Phase C4 — Dashboard Core ✓
 **Goal:** Next.js app in `cloud/dashboard/`, Clerk auth, session list, real-time session detail view with live tool call feed.
 
-- [ ] Next.js app scaffold in `cloud/dashboard/`
-- [ ] Clerk auth wired (sign in, sign out, protected routes)
-- [ ] Session list view with status, repo, started_at
-- [ ] Session detail view subscribed to websocket, live tool call feed
+- [x] Next.js app scaffold in `cloud/dashboard/`
+- [x] Clerk auth wired (sign in, sign out, protected routes)
+- [x] Session list view with status, repo, started_at
+- [x] Session detail view subscribed to websocket, live tool call feed
 
 ---
 

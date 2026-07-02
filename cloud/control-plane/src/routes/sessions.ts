@@ -112,6 +112,7 @@ export function sessionsRoutes(): Hono<AppEnv> {
       userId: user.id,
       repoId: repo.id,
       status: 'queued',
+      branch: parsed.data.branch,
       request: parsed.data.request,
       model: parsed.data.model ?? 'claude-sonnet-4-6',
     });

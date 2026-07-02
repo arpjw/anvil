@@ -41,6 +41,7 @@ export const sessions = pgTable('sessions', {
     .notNull()
     .references(() => repos.id, { onDelete: 'cascade' }),
   status: text('status').notNull().default('queued'),
+  branch: text('branch').notNull().default('main'),
   request: text('request').notNull(),
   model: text('model').notNull().default('claude-sonnet-4-6'),
   planJson: jsonb('plan_json'),

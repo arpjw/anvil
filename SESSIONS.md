@@ -3,6 +3,39 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session C4 — July 2, 2026
+**Phase:** C4 — Dashboard Core
+**Duration:** ~1h
+
+### What was accomplished
+- Finished the untracked cloud/dashboard scaffold (Next.js 16 + Clerk 6 + SWR + tailwind v4).
+- Session list, session detail w/ SSE, plan approval component, new-session form, repos settings.
+- Proxy route at app/api/proxy/[...path]/route.ts forwards to control-plane w/ Clerk bearer token; passes through SSE streams.
+- clerkMiddleware in proxy.ts (Next.js 16 Proxy runtime).
+- Fixed three real bugs uncovered during audit:
+  - branch selected by user in NewSessionForm was silently dropped — added branch column to sessions
+    (schema.ts), plumbed through createSession, provisioner.ts now uses session.branch not
+    repo.defaultBranch.
+  - startedAt on sessions was declared but never written — updateSessionStatus now stamps
+    startedAt on first transition into running (both pg + in-memory harness).
+  - drizzle migrations folder was empty — generated 0000_absent_infant_terrible.sql via drizzle-kit.
+- Force dynamic on all Clerk-gated pages + added app/not-found.tsx to unblock next build.
+
+### Checks
+- control-plane: bunx tsc --noEmit clean · bun test → 64/64 pass
+- dashboard: npx tsc --noEmit clean · next build succeeds w/ all routes dynamic
+
+### State of codebase at close
+- Dashboard fully wired end-to-end: sign-in → session list → new session (repo/branch/model
+  picker) → live SSE session detail with plan approval.
+- Control plane branch column & startedAt tracking landed cleanly with generated migration.
+
+### Next session should start with
+- Phase C5: Plan approval already present in dashboard; build per-hunk diff review UI reusing
+  src/diff/engine.ts semantics, wire PR creation via GitHub API on session complete.
+
+---
+
 ## Session 9 — June 19, 2026
 **Phase:** 9 — Execution Environment
 **Duration:** ~1h

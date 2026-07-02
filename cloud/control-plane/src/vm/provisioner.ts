@@ -180,7 +180,7 @@ export async function provisionSession(
         type: 'setup',
         payload: {
           repoUrl: `https://github.com/${repo.fullName}.git`,
-          branch: repo.defaultBranch,
+          branch: session.branch,
           githubToken: user.githubAccessToken ?? '',
         },
       }),
