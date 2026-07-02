@@ -68,6 +68,29 @@ async function main(): Promise<void> {
     process.exit(exitCode);
   }
 
+  // ── First-run wizard ─────────────────────────────────────────────────────────
+  // Skip on meta-commands (--version, init, doctor, config), on --headless
+  // (CI shouldn't get interactive prompts), and on --dry-run.
+  const isMetaCommand =
+    positional[0] === 'init' ||
+    positional[0] === 'doctor' ||
+    positional[0] === 'config';
+  if (
+    !isHeadless &&
+    !isDryRun &&
+    !isMetaCommand &&
+    !showVersion &&
+    !showCommands &&
+    !isRollback &&
+    !isResume
+  ) {
+    const { isFirstRun, runFirstRun } = await import('./setup/firstrun.js');
+    if (isFirstRun()) {
+      const firstRunWorkdir = resolve(positional[1] ?? process.cwd());
+      await runFirstRun(firstRunWorkdir);
+    }
+  }
+
   // ── anvil config ─────────────────────────────────────────────────────────────
   if (positional[0] === 'config') {
     const sub = positional[1];

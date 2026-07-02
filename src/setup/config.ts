@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { select } from '@inquirer/prompts';
@@ -156,6 +156,7 @@ export interface AnvilConfig {
   panelWidths: { left: number; right: number };
   autoVerify: boolean;
   autoBranch: boolean;
+  setupComplete: boolean;
 }
 
 const DEFAULTS: AnvilConfig = {
@@ -167,6 +168,7 @@ const DEFAULTS: AnvilConfig = {
   panelWidths: { left: 28, right: 72 },
   autoVerify: true,
   autoBranch: true,
+  setupComplete: false,
 };
 
 const ANVIL_DIR = join(homedir(), '.anvil');
@@ -189,6 +191,12 @@ export function saveConfig(partial: Partial<AnvilConfig>): void {
   const current = loadConfig();
   const next = { ...current, ...partial };
   writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2));
+  // Config may contain the API key — restrict to owner read/write.
+  try {
+    chmodSync(CONFIG_FILE, 0o600);
+  } catch {
+    // best-effort — non-POSIX platforms will just skip
+  }
 }
 
 export function getApiKey(): string | null {
@@ -208,6 +216,7 @@ const TYPE_MAP: Record<ConfigKey, string> = {
   panelWidths: 'object',
   autoVerify: 'boolean',
   autoBranch: 'boolean',
+  setupComplete: 'boolean',
 };
 
 function parseValue(key: ConfigKey, raw: string): AnvilConfig[ConfigKey] {
