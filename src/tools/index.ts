@@ -10,6 +10,7 @@ import { gitDiff } from './git_diff.js';
 import { gitBlame } from './git_blame.js';
 import { runCommand } from './run_command.js';
 import { runTests } from './run_tests.js';
+import { semanticSearch } from './semantic_search.js';
 import { uiStream } from '../ui/stream.js';
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
@@ -184,6 +185,32 @@ export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'semantic_search',
+      description:
+        'Semantic search over the working directory. Chunks the codebase by ' +
+        'function/class boundaries and returns the most conceptually similar ' +
+        'regions to your query. Use this for fuzzy questions like "where is ' +
+        'the retry logic" or "how is auth handled" — anything where exact ' +
+        'keywords are unreliable. Complements text_search, does not replace it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Natural-language description of what you are looking for',
+          },
+          top_k: {
+            type: 'number',
+            description: 'How many results to return (default: 5)',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'find_symbol',
       description:
         'Use the TypeScript language server to find the definition site and all references to a symbol. ' +
@@ -280,6 +307,13 @@ export async function executeTool(
       );
     case 'find_symbol':
       return findSymbol(args.symbol as string, args.file as string, workdir);
+    case 'semantic_search':
+      return semanticSearch(
+        args.query as string,
+        sessionId,
+        workdir,
+        { topK: args.top_k as number | undefined },
+      );
     case 'git_log':
       return gitLog(
         (args.workdir as string | undefined) ?? workdir,

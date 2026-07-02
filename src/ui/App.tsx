@@ -59,13 +59,20 @@ interface ContextSources {
   memoryLoaded: boolean;
 }
 
+interface WorkflowIndicator {
+  index: number;
+  total: number;
+  label: string;
+}
+
 function LeftPanel({
   phase, filesModified, request, plan, gitBranch, commitCount, prPath,
-  contextSources, memoryWritten,
+  contextSources, memoryWritten, workflow,
 }: {
   phase: Phase; filesModified: string[]; request: string; plan: Plan | null;
   gitBranch: string | null; commitCount: number; prPath: string | null;
   contextSources: ContextSources | null; memoryWritten: boolean;
+  workflow: WorkflowIndicator | null;
 }) {
   const truncReq = request.length > 65 ? request.slice(0, 65) + '…' : request;
 
@@ -84,6 +91,11 @@ function LeftPanel({
       <Box flexDirection="column">
         <Text dimColor>phase</Text>
         <Text color={PHASE_COLORS[phase]} bold>{PHASE_LABELS[phase]}</Text>
+        {workflow && (
+          <Text color="yellow">
+            Phase {workflow.index}/{workflow.total}: {workflow.label}
+          </Text>
+        )}
       </Box>
 
       {contextSources && (
@@ -218,6 +230,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const [contextSources, setContextSources] = useState<ContextSources | null>(null);
   const [memoryWritten, setMemoryWritten] = useState(false);
   const [verification, setVerification] = useState<VerificationState | undefined>(undefined);
+  const [workflow, setWorkflow] = useState<WorkflowIndicator | null>(null);
 
   const handleDiffDone = useCallback((acceptedIndices: Set<number>) => {
     if (!diffState) return;
@@ -433,6 +446,15 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
 
       case 'diff_resolved':
         break; // handled inline in handleDiffDone
+
+      case 'phase_transition':
+        setWorkflow({ index: event.index, total: event.total, label: event.label });
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `▸ Phase ${event.index}/${event.total}: ${event.label}`,
+          color: 'yellow',
+        }]);
+        break;
     }
   }, []);
 
@@ -506,6 +528,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
             prPath={prPath}
             contextSources={contextSources}
             memoryWritten={memoryWritten}
+            workflow={workflow}
           />
         </Box>
 

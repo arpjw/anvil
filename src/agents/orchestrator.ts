@@ -16,6 +16,31 @@ import { checkEditSize } from '../execution/guard.js';
 import { registerInterruptHandler } from '../execution/interrupt.js';
 import type { ImageContentBlock } from '../context/image.js';
 import { AVAILABLE_MODELS, loadConfig } from '../setup/config.js';
+import {
+  createWorkflowState,
+  transition,
+  formatPhase,
+  phaseIndex,
+  WORKFLOW_TOTAL,
+  WorkflowPhase,
+  PHASE_LABELS,
+  type WorkflowState,
+} from './workflow.js';
+
+function advance(state: WorkflowState, to: WorkflowPhase): WorkflowState {
+  const from = state.phase;
+  const next = transition(state, to);
+  uiStream.push({
+    type: 'phase_transition',
+    from,
+    to,
+    sessionId: state.sessionId,
+    index: phaseIndex(to),
+    total: WORKFLOW_TOTAL,
+    label: PHASE_LABELS[to],
+  });
+  return next;
+}
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
 
@@ -58,6 +83,18 @@ export async function runOrchestrator(
   const effectiveBaseURL = effectiveSpec.baseURL ?? 'https://api.anthropic.com/v1';
   const effectiveClient = client ?? new OpenAI({ apiKey: effectiveApiKey, baseURL: effectiveBaseURL });
 
+  // 10-phase workflow (light: emits phase_transition events, does not enforce control flow).
+  let workflow = createWorkflowState(sessionId);
+  uiStream.push({
+    type: 'phase_transition',
+    from: null,
+    to: workflow.phase,
+    sessionId,
+    index: phaseIndex(workflow.phase),
+    total: WORKFLOW_TOTAL,
+    label: PHASE_LABELS[workflow.phase],
+  });
+
   // ── Step 1: Load all context before anything else ────────────────────────────
   const ctx = await loadContext(request, workdir);
 
@@ -91,6 +128,7 @@ export async function runOrchestrator(
 
   // ── Simple path ──────────────────────────────────────────────────────────────
   if (!isComplex(cleanRequest)) {
+    workflow = advance(workflow, WorkflowPhase.PLANNING);
     const plan: Plan = {
       goal: cleanRequest,
       context: 'Single-file request, planner skipped.',
@@ -102,6 +140,7 @@ export async function runOrchestrator(
     };
 
     uiStream.on('event', captureDone);
+    workflow = advance(workflow, WorkflowPhase.EXECUTING);
     uiStream.push({ type: 'phase', phase: 'executing' });
     const report = await runExecutor(plan, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
     uiStream.off('event', captureDone);
@@ -109,6 +148,7 @@ export async function runOrchestrator(
     reportEscalations(report.escalations);
 
     if (!noVerify) {
+      workflow = advance(workflow, WorkflowPhase.VERIFYING);
       const verResult = await runVerification(workdir, sessionId, plan, ignorePatterns, effectiveClient, effectiveModelId);
       if (verResult.passed) {
         await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
@@ -119,6 +159,7 @@ export async function runOrchestrator(
       await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
     }
 
+    workflow = advance(workflow, WorkflowPhase.COMPLETE);
     uiStream.ensureDone('All steps completed successfully.');
     return;
   }
@@ -126,6 +167,8 @@ export async function runOrchestrator(
   // ── Complex path: planner → approval gate → branch → executor ────────────────
   let feedback: string | undefined;
   let plan: Plan;
+
+  workflow = advance(workflow, WorkflowPhase.EXPLORING);
 
   for (;;) {
     const [planPath] = await Promise.all([
@@ -138,19 +181,23 @@ export async function runOrchestrator(
       }, effectiveClient, effectiveModelId),
     ]);
 
+    workflow = advance(workflow, WorkflowPhase.PLANNING);
     plan = JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
     uiStream.push({ type: 'plan_ready', plan });
 
+    workflow = advance(workflow, WorkflowPhase.AWAITING_APPROVAL);
     const response = await uiStream.waitForApproval();
 
     if (response.answer === 'y') break;
 
     if (response.answer === 'n') {
+      workflow = advance(workflow, WorkflowPhase.COMPLETE);
       uiStream.push({ type: 'done', summary: 'Plan rejected by user.' });
       return;
     }
 
     feedback = response.feedback;
+    workflow = advance(workflow, WorkflowPhase.EXPLORING);
     uiStream.push({ type: 'phase', phase: 'planning' });
   }
 
@@ -174,6 +221,7 @@ export async function runOrchestrator(
   }
 
   // Create session branch before the executor touches any files.
+  workflow = advance(workflow, WorkflowPhase.BRANCHING);
   let branchName: string | null = null;
   try {
     branchName = await createSessionBranch(workdir, sessionId);
@@ -206,6 +254,7 @@ export async function runOrchestrator(
   uiStream.on('event', handleFileModified);
   uiStream.on('event', captureDone);
 
+  workflow = advance(workflow, WorkflowPhase.EXECUTING);
   uiStream.push({ type: 'phase', phase: 'executing' });
   const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
 
@@ -219,14 +268,18 @@ export async function runOrchestrator(
   // ── Verification ─────────────────────────────────────────────────────────────
   let verificationPassed = true;
   if (!noVerify) {
+    workflow = advance(workflow, WorkflowPhase.VERIFYING);
     const verResult = await runVerification(workdir, sessionId, planRef, ignorePatterns, effectiveClient, effectiveModelId);
     verificationPassed = verResult.passed;
     if (!verResult.passed) {
+      // verifier ran its own executor fix rounds; flag FIXING happened
+      workflow = advance(workflow, WorkflowPhase.FIXING);
       reportVerificationFailure(verResult.rounds, verResult.remainingFailures);
     }
   }
 
   if (verificationPassed) {
+    workflow = advance(workflow, WorkflowPhase.COMMITTING);
     await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
     if (report.success && branchName) {
       try {
@@ -237,6 +290,7 @@ export async function runOrchestrator(
   }
   // If verification failed, skip memory and PR — session is incomplete.
 
+  workflow = advance(workflow, WorkflowPhase.COMPLETE);
   uiStream.ensureDone('All steps completed.');
 }
 

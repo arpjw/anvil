@@ -4,6 +4,7 @@ import { join } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
 import { uiStream } from '../ui/stream.js';
+import { embeddingService } from '../services/embedding/index.js';
 import type { GitContext } from '../git/client.js';
 import type { ImageContentBlock } from '../context/image.js';
 
@@ -166,6 +167,16 @@ export async function runPlanner(
   uiStream.push({ type: 'phase', phase: 'planning' });
 
   const ignorePatterns = anvilCtx?.ignorePatterns;
+
+  // Kick off embedding indexing in the background so semantic_search is fast
+  // by the time the planner reaches for it. Non-blocking on purpose.
+  await embeddingService.start();
+  embeddingService.ensureIndexed(sessionId, workdir, { ignorePatterns }).catch(err => {
+    uiStream.push({
+      type: 'error',
+      message: `[embedding] indexing failed: ${(err as Error).message}`,
+    });
+  });
 
   await runStreamingLoop(effectiveClient, effectiveModelId, messages, plannerTools, async (name, args) => {
     if (name === 'write_plan') {

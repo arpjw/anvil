@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import type { Plan } from '../agents/planner.js';
 import type { FileDiff } from '../diff/engine.js';
+import type { WorkflowPhase } from '../agents/workflow.js';
 
 export type Phase = 'idle' | 'planning' | 'executing' | 'done' | 'error';
 
@@ -39,7 +40,16 @@ export type UIEvent =
   | { type: 'diff_resolved'; filepath: string; acceptedHunks: number; rejectedHunks: number }
   | { type: 'interrupt_requested' }
   | { type: 'interrupt_resolved'; action: 'continue' | 'stop' | 'rollback' }
-  | { type: 'session_resumed'; sessionId: string; plan: Plan };
+  | { type: 'session_resumed'; sessionId: string; plan: Plan }
+  | {
+      type: 'phase_transition';
+      from: WorkflowPhase | null;
+      to: WorkflowPhase;
+      sessionId: string;
+      index: number;
+      total: number;
+      label: string;
+    };
 
 class UIStream extends EventEmitter {
   private _done = false;
