@@ -14,6 +14,8 @@ import { ActivityEvent } from '@/components/ActivityEvent';
 import { DiffReview } from '@/components/DiffReview';
 import { PlanApproval } from '@/components/PlanApproval';
 import { StatusBadge, statusColor, statusLabel } from '@/components/StatusBadge';
+import { StreamingDiff } from '@/components/StreamingDiff';
+import type { FileDiff as EngineFileDiff } from '@/lib/diff-engine';
 import type {
   Plan,
   SessionDetail,
@@ -59,6 +61,21 @@ export function SessionDetailView({ sessionId }: { sessionId: string }) {
       <StatusBar session={session} status={status} />
     </div>
   );
+}
+
+interface ParsedFileDiff {
+  filepath: string;
+  diff: EngineFileDiff;
+}
+
+function parseFileDiffEvent(payload: unknown): ParsedFileDiff | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const obj = payload as Record<string, unknown>;
+  const filepath = typeof obj.filepath === 'string' ? obj.filepath : null;
+  if (!filepath) return null;
+  const rawDiff = obj.diff as { hunks?: unknown } | undefined;
+  if (!rawDiff || !Array.isArray(rawDiff.hunks)) return null;
+  return { filepath, diff: rawDiff as unknown as EngineFileDiff };
 }
 
 function fmtTimeAgo(iso: string | null): string {
@@ -442,6 +459,22 @@ function RightPanel({
                   pending={planPending}
                 />
               );
+            }
+            if (e.type === 'file_diff') {
+              const parsed = parseFileDiffEvent(e.payload);
+              if (parsed) {
+                // Diffs freeze once the session has finished streaming lines.
+                const isStreaming =
+                  status === 'running' || status === 'provisioning';
+                return (
+                  <StreamingDiff
+                    key={`filediff-${idx}`}
+                    filepath={parsed.filepath}
+                    diff={parsed.diff}
+                    isStreaming={isStreaming}
+                  />
+                );
+              }
             }
             return <ActivityEvent key={idx} event={e} />;
           })}

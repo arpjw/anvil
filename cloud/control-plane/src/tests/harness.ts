@@ -381,6 +381,20 @@ export function createMemoryRepository(): Repository & {
       }
       return count;
     },
+
+    async createDiff(input) {
+      const diff: Diff = {
+        id: uuid(),
+        sessionId: input.sessionId,
+        filepath: input.filepath,
+        originalContent: input.originalContent,
+        newContent: input.newContent,
+        status: 'pending',
+        createdAt: new Date(),
+      };
+      diffsById.set(diff.id, diff);
+      return diff;
+    },
   };
 }
 

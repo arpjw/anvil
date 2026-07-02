@@ -95,6 +95,12 @@ export interface Repository {
   findDiffById(id: string): Promise<Diff | null>;
   updateDiffStatus(id: string, status: DiffStatus): Promise<Diff>;
   approveAllPendingDiffs(sessionId: string): Promise<number>;
+  createDiff(input: {
+    sessionId: string;
+    filepath: string;
+    originalContent: string | null;
+    newContent: string | null;
+  }): Promise<Diff>;
 }
 
 export function createPgRepository(
@@ -480,6 +486,21 @@ export function createPgRepository(
         )
         .returning({ id: diffs.id });
       return updated.length;
+    },
+
+    async createDiff(input) {
+      const [row] = await db
+        .insert(diffs)
+        .values({
+          sessionId: input.sessionId,
+          filepath: input.filepath,
+          originalContent: input.originalContent,
+          newContent: input.newContent,
+          status: 'pending',
+        })
+        .returning();
+      if (!row) throw new Error('failed to create diff');
+      return row;
     },
   };
 }

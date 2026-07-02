@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { shadowWrite, commitContent, formatDiagnostics } from '../shadow/workspace.js';
+import { generateDiff } from '../diff/engine.js';
 import { uiStream } from '../ui/stream.js';
 
 const retryCounters = new Map<string, number>();
@@ -45,6 +46,23 @@ export async function writeFile(
     commitContent(fullPath, result.finalContent);
     uiStream.push({ type: 'shadow_result', file: fullPath, errorCount: 0, outcome: 'committed' });
     uiStream.push({ type: 'file_modified', path: fullPath });
+
+    // Stream the committed diff so downstream consumers (TUI, dashboard, cloud
+    // event pipeline) can render it immediately without waiting for session end.
+    if (result.finalContent !== originalContent) {
+      const diff = generateDiff(originalContent, result.finalContent, fullPath);
+      if (diff.hunks.length > 0) {
+        uiStream.push({
+          type: 'file_diff',
+          filepath: fullPath,
+          originalContent,
+          newContent: result.finalContent,
+          diff,
+          sessionId,
+        });
+      }
+    }
+
     const tag = attempt > 1 ? ` (self-corrected on attempt ${attempt})` : '';
     return `Wrote ${fullPath}${tag}`;
   }

@@ -38,6 +38,14 @@ export type UIEvent =
   | { type: 'verification_fail'; failures: string[] }
   | { type: 'diff_ready'; filepath: string; diff: FileDiff; hunkCount: number }
   | { type: 'diff_resolved'; filepath: string; acceptedHunks: number; rejectedHunks: number }
+  | {
+      type: 'file_diff';
+      filepath: string;
+      originalContent: string;
+      newContent: string;
+      diff: FileDiff;
+      sessionId: string;
+    }
   | { type: 'interrupt_requested' }
   | { type: 'interrupt_resolved'; action: 'continue' | 'stop' | 'rollback' }
   | { type: 'session_resumed'; sessionId: string; plan: Plan }

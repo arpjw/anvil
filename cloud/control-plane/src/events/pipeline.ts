@@ -64,15 +64,30 @@ export async function processEvent(
   event: UIEvent,
   opts: ProcessEventOptions = {},
 ): Promise<void> {
+  // The CLI's UIEvent union has flat top-level properties (e.g. phase_transition
+  // carries {from, to, index, ...} directly). When such an event arrives without
+  // a `payload` field, gather the extras into one so downstream consumers (Redis,
+  // SSE, dashboard) see a consistent `{type, payload}` shape.
+  const asRecord = event as unknown as Record<string, unknown>;
+  let normalizedPayload: unknown = event.payload ?? null;
+  if (event.payload === undefined) {
+    const extras: Record<string, unknown> = {};
+    for (const key of Object.keys(asRecord)) {
+      if (key === 'type' || key === 'payload') continue;
+      extras[key] = asRecord[key];
+    }
+    if (Object.keys(extras).length > 0) normalizedPayload = extras;
+  }
+
   try {
-    await repo.createEvent(sessionId, event.type, event.payload ?? null);
+    await repo.createEvent(sessionId, event.type, normalizedPayload);
   } catch (err) {
     logger.warn({ sessionId, eventType: event.type, err }, 'failed to persist event');
   }
 
   await publishToChannel(redis, sessionId, {
     type: event.type,
-    payload: event.payload ?? null,
+    payload: normalizedPayload,
     timestamp: Date.now(),
   });
 

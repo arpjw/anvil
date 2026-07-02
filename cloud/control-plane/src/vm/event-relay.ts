@@ -21,6 +21,28 @@ type VMMessage =
   | { type: 'ready'; payload: { version: string } }
   | { type: 'setup_complete'; payload: { repoPath: string } };
 
+interface FileDiffEventShape {
+  type: 'file_diff';
+  filepath: string;
+  originalContent?: string | null;
+  newContent?: string | null;
+}
+
+function asFileDiffEvent(evt: UIEvent): FileDiffEventShape | null {
+  if (!evt || typeof evt !== 'object') return null;
+  const record = evt as Record<string, unknown>;
+  if (record.type !== 'file_diff') return null;
+  if (typeof record.filepath !== 'string') return null;
+  return {
+    type: 'file_diff',
+    filepath: record.filepath,
+    originalContent:
+      typeof record.originalContent === 'string' ? record.originalContent : null,
+    newContent:
+      typeof record.newContent === 'string' ? record.newContent : null,
+  };
+}
+
 function decode(data: string | ArrayBuffer | Uint8Array): string {
   if (typeof data === 'string') return data;
   if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
@@ -64,6 +86,22 @@ async function handleMessage(
   switch (msg.type) {
     case 'event': {
       const evt = msg.payload;
+      const fileDiff = asFileDiffEvent(evt);
+      if (fileDiff) {
+        try {
+          await deps.repo.createDiff({
+            sessionId,
+            filepath: fileDiff.filepath,
+            originalContent: fileDiff.originalContent ?? null,
+            newContent: fileDiff.newContent ?? null,
+          });
+        } catch (err) {
+          logger.warn(
+            { sessionId, filepath: fileDiff.filepath, err },
+            'failed to persist streaming file_diff',
+          );
+        }
+      }
       await processEvent(deps.repo, deps.redis, sessionId, evt, { startedAt });
       sessionPool.broadcast(sessionId, evt);
       return;
