@@ -74,7 +74,7 @@ async function handleMessage(
         deps.redis,
         sessionId,
         { type: 'done', payload: msg.payload },
-        { startedAt },
+        { startedAt, deps, autoOpenPr: true },
       );
       sessionPool.broadcast(sessionId, {
         type: 'session_complete',
@@ -88,7 +88,7 @@ async function handleMessage(
         deps.redis,
         sessionId,
         { type: 'error', payload: msg.payload },
-        { startedAt },
+        { startedAt, deps, autoOpenPr: true },
       );
       sessionPool.broadcast(sessionId, {
         type: 'session_error',
@@ -102,7 +102,7 @@ async function handleMessage(
         deps.redis,
         sessionId,
         { type: 'aborted', payload: null },
-        { startedAt },
+        { startedAt, deps, autoOpenPr: true },
       );
       try {
         const session = await deps.repo.findSessionById(sessionId);

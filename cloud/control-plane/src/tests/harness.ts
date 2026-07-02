@@ -12,6 +12,7 @@ import type {
   DiffStatus,
   Event,
   NewSession,
+  PrState,
   Repo,
   Session,
   SessionStatus,
@@ -49,6 +50,10 @@ export function createMemoryRepository(): Repository & {
         if (user.clerkId === clerkId) return user;
       }
       return null;
+    },
+
+    async findUserById(id) {
+      return usersById.get(id) ?? null;
     },
 
     async createUser({ clerkId }) {
@@ -169,6 +174,7 @@ export function createMemoryRepository(): Repository & {
         vmIp: input.vmIp ?? null,
         vmPort: input.vmPort ?? null,
         prUrl: input.prUrl ?? null,
+        prState: input.prState ?? null,
         startedAt: input.startedAt ?? null,
         completedAt: input.completedAt ?? null,
         durationSeconds: input.durationSeconds ?? null,
@@ -204,9 +210,24 @@ export function createMemoryRepository(): Repository & {
     async updateSessionPrUrl(id, prUrl) {
       const existing = sessionsById.get(id);
       if (!existing) throw new Error('session not found');
-      const next: Session = { ...existing, prUrl };
+      const next: Session = { ...existing, prUrl, prState: 'open' };
       sessionsById.set(id, next);
       return next;
+    },
+
+    async updateSessionPrState(id, prState: PrState) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = { ...existing, prState };
+      sessionsById.set(id, next);
+      return next;
+    },
+
+    async findSessionByPrUrl(prUrl) {
+      for (const session of sessionsById.values()) {
+        if (session.prUrl === prUrl) return session;
+      }
+      return null;
     },
 
     async completeSession(id, fields) {
@@ -305,6 +326,7 @@ export type StubbedGithub = {
   putFileCalls: StubbedPutFileCall[];
   prCalls: StubbedPrCall[];
   prResponses: Map<string, { url: string; number: number }>;
+  userRepos: Array<{ fullName: string; defaultBranch: string; private: boolean }>;
   lastToken: string | null | undefined;
 };
 
@@ -374,6 +396,9 @@ export function createGithubStub(stub: StubbedGithub) {
           }`,
           number: stub.prCalls.length,
         };
+      },
+      async listUserRepos() {
+        return stub.userRepos;
       },
     };
   };
@@ -459,6 +484,7 @@ export function createHarness(): Harness {
     putFileCalls: [],
     prCalls: [],
     prResponses: new Map(),
+    userRepos: [],
     lastToken: undefined,
   };
   const redis = new FakeRedis();

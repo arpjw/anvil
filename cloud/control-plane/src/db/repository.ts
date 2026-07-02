@@ -10,6 +10,7 @@ import {
   type DiffStatus,
   type Event,
   type NewSession,
+  type PrState,
   type Repo,
   type Session,
   type SessionStatus,
@@ -27,6 +28,7 @@ export type SessionDetail = Session & {
 
 export interface Repository {
   findUserByClerkId(clerkId: string): Promise<User | null>;
+  findUserById(id: string): Promise<User | null>;
   createUser(input: { clerkId: string }): Promise<User>;
   setUserGithub(
     userId: string,
@@ -55,6 +57,8 @@ export interface Repository {
     fields: { vmIp: string | null; vmPort: number | null },
   ): Promise<Session>;
   updateSessionPrUrl(id: string, prUrl: string): Promise<Session>;
+  updateSessionPrState(id: string, prState: PrState): Promise<Session>;
+  findSessionByPrUrl(prUrl: string): Promise<Session | null>;
   completeSession(
     id: string,
     fields: { completedAt: Date; durationSeconds: number },
@@ -81,6 +85,15 @@ export function createPgRepository(
         .select()
         .from(users)
         .where(eq(users.clerkId, clerkId))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async findUserById(id) {
+      const rows = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, id))
         .limit(1);
       return rows[0] ?? null;
     },
@@ -162,6 +175,7 @@ export function createPgRepository(
           vmIp: sessions.vmIp,
           vmPort: sessions.vmPort,
           prUrl: sessions.prUrl,
+          prState: sessions.prState,
           startedAt: sessions.startedAt,
           completedAt: sessions.completedAt,
           durationSeconds: sessions.durationSeconds,
@@ -189,6 +203,7 @@ export function createPgRepository(
           vmIp: sessions.vmIp,
           vmPort: sessions.vmPort,
           prUrl: sessions.prUrl,
+          prState: sessions.prState,
           startedAt: sessions.startedAt,
           completedAt: sessions.completedAt,
           durationSeconds: sessions.durationSeconds,
@@ -258,11 +273,30 @@ export function createPgRepository(
     async updateSessionPrUrl(id, prUrl) {
       const [row] = await db
         .update(sessions)
-        .set({ prUrl })
+        .set({ prUrl, prState: 'open' })
         .where(eq(sessions.id, id))
         .returning();
       if (!row) throw new Error('session not found');
       return row;
+    },
+
+    async updateSessionPrState(id, prState) {
+      const [row] = await db
+        .update(sessions)
+        .set({ prState })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async findSessionByPrUrl(prUrl) {
+      const rows = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.prUrl, prUrl))
+        .limit(1);
+      return rows[0] ?? null;
     },
 
     async completeSession(id, fields) {

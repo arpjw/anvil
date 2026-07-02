@@ -44,6 +44,22 @@ export const octokitGithubClient: GithubClientFactory = (accessToken) => {
         throwNotAccessible(err);
       }
     },
+    async listUserRepos() {
+      try {
+        const { data } = await client.repos.listForAuthenticatedUser({
+          per_page: 100,
+          sort: 'pushed',
+          affiliation: 'owner,collaborator,organization_member',
+        });
+        return data.map((r) => ({
+          fullName: r.full_name,
+          defaultBranch: r.default_branch,
+          private: r.private,
+        }));
+      } catch (err) {
+        throwNotAccessible(err);
+      }
+    },
     async getBranchSha(owner, repo, branch) {
       try {
         const { data } = await client.git.getRef({

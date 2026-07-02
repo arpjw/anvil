@@ -1,6 +1,8 @@
 import type { Repository } from '../db/repository';
 import type { SessionStatus } from '../db/schema';
+import type { AppDeps } from '../lib/context';
 import { logger } from '../lib/logger';
+import { openPr } from '../routes/pr';
 import { canTransition, isTerminal, transition } from '../state/machine';
 
 export interface RedisPublisher {
@@ -51,6 +53,8 @@ function nextStatusFor(eventType: string): SessionStatus | null {
 
 export interface ProcessEventOptions {
   startedAt?: number;
+  deps?: AppDeps;
+  autoOpenPr?: boolean;
 }
 
 export async function processEvent(
@@ -108,10 +112,34 @@ export async function processEvent(
       );
       await repo.completeSession(sessionId, { completedAt, durationSeconds });
     }
+    if (next === 'complete' && opts.autoOpenPr && opts.deps) {
+      await maybeOpenPr(sessionId, opts.deps);
+    }
   } catch (err) {
     logger.warn(
       { sessionId, from: current, to: next, err },
       'failed to update session status',
     );
+  }
+}
+
+async function maybeOpenPr(sessionId: string, deps: AppDeps): Promise<void> {
+  try {
+    const session = await deps.repo.findSessionById(sessionId);
+    if (!session || session.prUrl) return;
+    const approvedDiffs = (
+      await deps.repo.listDiffsBySession(sessionId)
+    ).filter((d) => d.status === 'approved');
+    if (approvedDiffs.length === 0) return;
+    const owner = await deps.repo.findUserById(session.userId);
+    if (!owner) return;
+    await openPr({
+      session,
+      approvedDiffs,
+      githubToken: owner.githubAccessToken,
+      deps,
+    });
+  } catch (err) {
+    logger.warn({ sessionId, err }, 'auto-open PR failed');
   }
 }

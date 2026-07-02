@@ -3,6 +3,52 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session C6 — July 2, 2026
+**Phase:** C6 — GitHub Integration
+**Duration:** ~1h
+
+### What was accomplished
+- GET /api/v1/github/repos: lists authenticated user's GitHub repos via octokit
+  listForAuthenticatedUser (sorted by pushed, w/ collaborator + org affiliations).
+- ReposSettings gets a GithubPicker section: search-as-you-type over the fetched list,
+  one-click Add per repo, "already connected" pill for imported entries.
+- POST /webhooks/github: verifies HMAC-SHA256 signature (constant-time hex compare),
+  routes pull_request.closed → merged/closed → sessions.pr_state; ignores non-PR events;
+  matched:false for unknown pr_url. Mounted top-level to avoid subrouter middleware
+  bleeding auth into the webhook path (learned the hard way — Hono r.use('*') applies to
+  ALL paths under a mount, including ones without matching handlers, so mounting the
+  webhook under /api/v1/ trapped it inside diffs/pr router middleware and returned 401).
+- Session PR auto-open on complete: event-relay now passes deps + autoOpenPr=true to
+  processEvent; pipeline.maybeOpenPr loads owner + approved diffs, invokes routes/pr.openPr
+  server-side. Idempotent w/ existing PR URL check.
+- Schema: sessions.pr_state ('open'|'merged'|'closed'). Second drizzle migration
+  0001_black_impossible_man.sql covers it.
+- Repository: added findUserById, updateSessionPrState, findSessionByPrUrl.
+- GithubClient extended: listUserRepos + full stub in harness.
+- 6 new integration tests: /github/repos ok + not-connected, webhook bad sig / ignored
+  event / merged transition / unmatched pr_url.
+
+### Decisions made
+- Mount webhooks at /webhooks/github, not /api/v1/webhooks — sub-router middleware
+  isolation quirk in Hono.
+- pr_state defaults to null; only becomes 'open' when we first write pr_url. Keeps
+  legacy sessions from being flagged as PR-bearing.
+- Auto-open PR is best-effort — warns and moves on if the user lost their github token.
+
+### Checks
+- control-plane: bunx tsc clean, bun test 74/74 (was 68, added 6 github tests).
+- dashboard: tsc clean, next build clean.
+
+### State of codebase at close
+- End-to-end: connect GitHub → import a repo → run session → dashboard-approved diffs
+  → PR auto-opens → webhook flips pr_state on merge.
+
+### Next session should start with
+- Phase C7: Stripe metered billing (VM minute tracking → Stripe usage record → dashboard
+  usage view; subscription plans).
+
+---
+
 ## Session C5 — July 2, 2026
 **Phase:** C5 — Plan Approval + Diff Review
 **Duration:** ~1h

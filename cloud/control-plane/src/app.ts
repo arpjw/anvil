@@ -9,6 +9,7 @@ import { reposRoutes } from './routes/repos';
 import { sessionsRoutes } from './routes/sessions';
 import { diffsRoutes } from './routes/diffs';
 import { prRoutes } from './routes/pr';
+import { githubRoutes, githubWebhookRoutes } from './routes/github';
 import { requireAuth } from './middleware/auth';
 import { sseHandler } from './events/sse';
 
@@ -16,6 +17,7 @@ export type CreateAppOptions = {
   deps: AppDeps;
   dashboardOrigin?: string;
   logger?: Logger;
+  githubWebhookSecret?: string;
 };
 
 export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
@@ -81,6 +83,13 @@ export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
   app.route('/api/v1/sessions', sessionsRoutes());
   app.route('/api/v1', diffsRoutes());
   app.route('/api/v1', prRoutes());
+  app.route('/api/v1/github', githubRoutes());
+  if (opts.githubWebhookSecret) {
+    app.route(
+      '/webhooks',
+      githubWebhookRoutes({ webhookSecret: opts.githubWebhookSecret }),
+    );
+  }
 
   app.onError((err, c) => {
     const requestId = c.get('requestId') ?? 'unknown';

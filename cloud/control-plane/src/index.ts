@@ -48,6 +48,7 @@ async function main() {
     },
     dashboardOrigin,
     logger,
+    githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
   });
 
   const server = Bun.serve({

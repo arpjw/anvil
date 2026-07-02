@@ -192,10 +192,11 @@ function LeftPanel({
               href={prUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-sm underline"
+              className="text-sm underline flex items-center gap-2"
               style={{ color: '#60a5fa' }}
             >
-              View pull request
+              <span>View pull request</span>
+              {session.prState && <PrStateBadge state={session.prState} />}
             </a>
           )}
         </Section>
@@ -231,6 +232,23 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
         {value}
       </span>
     </div>
+  );
+}
+
+function PrStateBadge({ state }: { state: 'open' | 'merged' | 'closed' }) {
+  const map = {
+    open: { color: '#60a5fa', label: 'open' },
+    merged: { color: '#a78bfa', label: 'merged' },
+    closed: { color: '#6b7280', label: 'closed' },
+  } as const;
+  const m = map[state];
+  return (
+    <span
+      className="px-1.5 py-0 text-[10px] uppercase tracking-wider rounded font-mono"
+      style={{ color: m.color, border: `1px solid ${m.color}` }}
+    >
+      {m.label}
+    </span>
   );
 }
 

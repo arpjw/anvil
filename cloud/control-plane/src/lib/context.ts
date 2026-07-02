@@ -5,12 +5,19 @@ import type { SSEBroadcaster } from '../events/broadcaster';
 
 export type VerifyTokenFn = (token: string) => Promise<{ clerkId: string }>;
 
+export type GithubRepoSummary = {
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+};
+
 export type GithubClient = {
   reposGet: (owner: string, repo: string) => Promise<{ defaultBranch: string }>;
   reposListBranches: (
     owner: string,
     repo: string,
   ) => Promise<Array<{ name: string; commit: { sha: string } }>>;
+  listUserRepos: () => Promise<GithubRepoSummary[]>;
   getBranchSha: (
     owner: string,
     repo: string,

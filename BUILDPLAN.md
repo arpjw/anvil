@@ -238,13 +238,13 @@
 
 ---
 
-## Phase C6 — GitHub Integration
+## Phase C6 — GitHub Integration ✓
 **Goal:** Repo picker on session create, clone into VM, PR on session complete, webhook for PR merge status.
 
-- [ ] Repo picker on session create (lists user's GitHub repos)
-- [ ] Clone selected repo into VM at session start
-- [ ] PR opened on session complete with generated description
-- [ ] GitHub webhook for PR merge/close status, updates session record
+- [x] Repo picker on session create (lists user's GitHub repos)
+- [x] Clone selected repo into VM at session start
+- [x] PR opened on session complete with generated description
+- [x] GitHub webhook for PR merge/close status, updates session record
 
 ---
 

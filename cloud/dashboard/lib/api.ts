@@ -100,6 +100,20 @@ export async function deleteRepo(id: string): Promise<void> {
   await request<void>('DELETE', `/repos/${id}`);
 }
 
+export interface GithubRepoSummary {
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+export async function listGithubRepos(): Promise<GithubRepoSummary[]> {
+  const data = await request<{ repos: GithubRepoSummary[] }>(
+    'GET',
+    '/github/repos',
+  );
+  return data.repos;
+}
+
 export async function getRepoBranches(id: string): Promise<string[]> {
   const data = await request<{ branches: Array<{ name: string }> | string[] }>(
     'GET',

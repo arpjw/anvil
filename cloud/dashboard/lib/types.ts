@@ -29,6 +29,7 @@ export interface Session {
   vmIp: string | null;
   vmPort: number | null;
   prUrl: string | null;
+  prState: 'open' | 'merged' | 'closed' | null;
   startedAt: string | null;
   completedAt: string | null;
   durationSeconds: number | null;

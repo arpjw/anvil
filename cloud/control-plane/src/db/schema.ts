@@ -48,6 +48,7 @@ export const sessions = pgTable('sessions', {
   vmIp: text('vm_ip'),
   vmPort: integer('vm_port'),
   prUrl: text('pr_url'),
+  prState: text('pr_state'),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   durationSeconds: integer('duration_seconds'),
@@ -106,3 +107,6 @@ export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 export const DIFF_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type DiffStatus = (typeof DIFF_STATUSES)[number];
+
+export const PR_STATES = ['open', 'merged', 'closed'] as const;
+export type PrState = (typeof PR_STATES)[number];
