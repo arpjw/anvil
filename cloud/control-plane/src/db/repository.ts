@@ -50,6 +50,7 @@ export interface Repository {
     defaultBranch: string;
   }): Promise<Repo>;
   deleteRepo(id: string): Promise<void>;
+  setRepoGeneratedRules(id: string, generatedRules: string): Promise<Repo>;
 
   listSessionsByUser(
     userId: string,
@@ -207,6 +208,16 @@ export function createPgRepository(
 
     async deleteRepo(id) {
       await db.delete(repos).where(eq(repos.id, id));
+    },
+
+    async setRepoGeneratedRules(id, generatedRules) {
+      const [row] = await db
+        .update(repos)
+        .set({ generatedRules, analyzedAt: new Date() })
+        .where(eq(repos.id, id))
+        .returning();
+      if (!row) throw new Error('repo not found');
+      return row;
     },
 
     async listSessionsByUser(userId, opts) {

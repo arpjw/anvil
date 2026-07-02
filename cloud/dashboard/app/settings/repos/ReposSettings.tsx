@@ -5,10 +5,12 @@ import useSWR, { useSWRConfig } from 'swr';
 import {
   connectRepo,
   deleteRepo,
+  getRepo,
   getRepoIndexStatus,
   getRepos,
   listGithubRepos,
   type GithubRepoSummary,
+  type RepoDetail,
   type RepoIndexStatus,
 } from '@/lib/api';
 import type { Repo } from '@/lib/types';
@@ -21,6 +23,7 @@ export function ReposSettings() {
   const [branch, setBranch] = useState('main');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rulesModalRepoId, setRulesModalRepoId] = useState<string | null>(null);
 
   async function onConnect() {
     if (!fullName.trim()) return;
@@ -147,8 +150,18 @@ export function ReposSettings() {
                 </div>
                 <IndexStatusBadge repoId={r.id} />
                 <button
-                  onClick={() => onRemove(r)}
+                  onClick={() => setRulesModalRepoId(r.id)}
                   className="ml-3 text-xs px-2.5 py-1 rounded"
+                  style={{
+                    color: '#fbbf24',
+                    border: '1px solid rgba(251, 191, 36, 0.4)',
+                  }}
+                >
+                  View rules
+                </button>
+                <button
+                  onClick={() => onRemove(r)}
+                  className="ml-2 text-xs px-2.5 py-1 rounded"
                   style={{
                     color: '#f87171',
                     border: '1px solid rgba(248, 113, 113, 0.3)',
@@ -161,6 +174,111 @@ export function ReposSettings() {
           </ul>
         )}
       </section>
+
+      {rulesModalRepoId && (
+        <GeneratedRulesModal
+          repoId={rulesModalRepoId}
+          onClose={() => setRulesModalRepoId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function GeneratedRulesModal({
+  repoId,
+  onClose,
+}: {
+  repoId: string;
+  onClose: () => void;
+}) {
+  const { data, error, isLoading } = useSWR<RepoDetail>(
+    `/repos/${repoId}`,
+    () => getRepo(repoId),
+  );
+  const [copied, setCopied] = useState(false);
+
+  async function copyToClipboard() {
+    if (!data?.generatedRules) return;
+    try {
+      await navigator.clipboard.writeText(data.generatedRules);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard blocked; do nothing
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-md max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+        style={{ backgroundColor: '#111111', border: '1px solid #1f1f1f' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="px-5 py-3 flex items-center justify-between"
+          style={{ borderBottom: '1px solid #1f1f1f' }}
+        >
+          <div>
+            <h2 className="text-sm font-medium" style={{ color: '#f0f0f0' }}>
+              Generated .anvil/rules.md
+            </h2>
+            {data?.fullName && (
+              <p className="text-xs mt-0.5 font-mono" style={{ color: '#6b7280' }}>
+                {data.fullName}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {data?.generatedRules && (
+              <button
+                onClick={copyToClipboard}
+                className="text-xs px-2.5 py-1 rounded font-medium"
+                style={{ backgroundColor: '#fbbf24', color: '#0a0a0a' }}
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-xs px-2.5 py-1 rounded"
+              style={{ color: '#6b7280', border: '1px solid #1f1f1f' }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {isLoading && (
+            <p className="text-sm" style={{ color: '#6b7280' }}>
+              Loading…
+            </p>
+          )}
+          {error && (
+            <p className="text-sm" style={{ color: '#f87171' }}>
+              Could not load repo.
+            </p>
+          )}
+          {data && !data.generatedRules && (
+            <p className="text-sm" style={{ color: '#6b7280' }}>
+              Analysing repo… check back in a moment.
+            </p>
+          )}
+          {data?.generatedRules && (
+            <pre
+              className="text-[12px] font-mono whitespace-pre-wrap"
+              style={{ color: '#f0f0f0' }}
+            >
+              {data.generatedRules}
+            </pre>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

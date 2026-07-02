@@ -13,7 +13,10 @@ export type GithubRepoSummary = {
 };
 
 export type GithubClient = {
-  reposGet: (owner: string, repo: string) => Promise<{ defaultBranch: string }>;
+  reposGet: (
+    owner: string,
+    repo: string,
+  ) => Promise<{ defaultBranch: string; language?: string | null }>;
   reposListBranches: (
     owner: string,
     repo: string,

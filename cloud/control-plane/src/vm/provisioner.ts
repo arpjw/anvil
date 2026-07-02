@@ -193,6 +193,7 @@ export async function provisionSession(
           repoUrl: `https://github.com/${repo.fullName}.git`,
           branch: session.branch,
           githubToken: user.githubAccessToken ?? '',
+          generatedRules: repo.generatedRules ?? null,
         },
       }),
     );

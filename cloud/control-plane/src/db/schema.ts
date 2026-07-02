@@ -29,6 +29,8 @@ export const repos = pgTable('repos', {
     .references(() => users.id, { onDelete: 'cascade' }),
   fullName: text('full_name').notNull(),
   defaultBranch: text('default_branch').notNull().default('main'),
+  generatedRules: text('generated_rules'),
+  analyzedAt: timestamp('analyzed_at', { withTimezone: true }),
   installedAt: timestamp('installed_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

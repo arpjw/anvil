@@ -24,7 +24,10 @@ export const octokitGithubClient: GithubClientFactory = (accessToken) => {
     async reposGet(owner, repo) {
       try {
         const { data } = await client.repos.get({ owner, repo });
-        return { defaultBranch: data.default_branch };
+        return {
+          defaultBranch: data.default_branch,
+          language: data.language ?? null,
+        };
       } catch (err) {
         throwNotAccessible(err);
       }

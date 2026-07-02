@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { spawn } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -23,6 +26,7 @@ interface SetupPayload {
   repoUrl: string;
   branch: string;
   githubToken: string;
+  generatedRules?: string | null;
 }
 
 interface AnvilAgent {
@@ -125,12 +129,8 @@ async function handleSetup(
   ws: WebSocket,
   payload: SetupPayload,
 ): Promise<void> {
-  const { spawn } = await import('node:child_process');
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-
-  const target = path.join('/workspace', 'repo');
-  await fs.mkdir(path.dirname(target), { recursive: true });
+  const target = join('/workspace', 'repo');
+  mkdirSync(dirname(target), { recursive: true });
 
   const cloneUrl = payload.githubToken
     ? payload.repoUrl.replace(
@@ -157,6 +157,22 @@ async function handleSetup(
       else reject(new Error(`git clone exited with code ${code}`));
     });
   });
+
+  // Write .anvil/rules.md from the control-plane-generated content, if any.
+  // If the repo already ships its own .anvil/rules.md, prepend ours as an
+  // "auto-generated context" section so user-written rules take precedence.
+  if (payload.generatedRules) {
+    const rulesDir = join(target, '.anvil');
+    const rulesPath = join(rulesDir, 'rules.md');
+    mkdirSync(rulesDir, { recursive: true });
+    if (existsSync(rulesPath)) {
+      const existing = readFileSync(rulesPath, 'utf-8');
+      const header = `# Auto-generated context below\n${payload.generatedRules}\n\n---\n\n# User rules (take precedence)\n`;
+      writeFileSync(rulesPath, header + existing, 'utf-8');
+    } else {
+      writeFileSync(rulesPath, payload.generatedRules, 'utf-8');
+    }
+  }
 
   send(ws, { type: 'setup_complete', payload: { repoPath: target } });
 }

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { rateLimit } from '../middleware/rate-limit';
 import { HttpError } from '../lib/errors';
+import { triggerRepoAnalysis } from '../github/analyzer';
 import { triggerRepoIndexing } from '../github/index-repo';
 import type { AppEnv } from '../lib/context';
 
@@ -58,7 +59,27 @@ export function reposRoutes(): Hono<AppEnv> {
       githubToken: user.githubAccessToken,
     });
 
+    // Fire-and-forget: analyse the repo and write a starter .anvil/rules.md.
+    void triggerRepoAnalysis(deps, {
+      repoId: created.id,
+      fullName: created.fullName,
+      branch: created.defaultBranch,
+      language: ghRepo.language ?? 'unknown',
+      githubToken: user.githubAccessToken,
+    });
+
     return c.json({ repo: created }, 201);
+  });
+
+  r.get('/:id', async (c) => {
+    const user = c.get('user');
+    const deps = c.get('deps');
+    const id = c.req.param('id');
+    const repo = await deps.repo.findRepoById(id);
+    if (!repo || repo.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'repo not found');
+    }
+    return c.json({ repo });
   });
 
   r.get('/:id/index-status', async (c) => {

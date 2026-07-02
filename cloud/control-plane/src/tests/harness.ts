@@ -124,10 +124,20 @@ export function createMemoryRepository(): Repository & {
         userId: input.userId,
         fullName: input.fullName,
         defaultBranch: input.defaultBranch,
+        generatedRules: null,
+        analyzedAt: null,
         installedAt: new Date(),
       };
       reposById.set(repo.id, repo);
       return repo;
+    },
+
+    async setRepoGeneratedRules(id, generatedRules) {
+      const existing = reposById.get(id);
+      if (!existing) throw new Error('repo not found');
+      const next: Repo = { ...existing, generatedRules, analyzedAt: new Date() };
+      reposById.set(id, next);
+      return next;
     },
 
     async deleteRepo(id) {

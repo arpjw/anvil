@@ -126,6 +126,16 @@ export async function getRepoIndexStatus(id: string): Promise<RepoIndexStatus> {
   return request<RepoIndexStatus>('GET', `/repos/${id}/index-status`);
 }
 
+export interface RepoDetail extends Repo {
+  generatedRules?: string | null;
+  analyzedAt?: string | null;
+}
+
+export async function getRepo(id: string): Promise<RepoDetail> {
+  const data = await request<{ repo: RepoDetail }>('GET', `/repos/${id}`);
+  return data.repo;
+}
+
 export async function getRepoBranches(id: string): Promise<string[]> {
   const data = await request<{ branches: Array<{ name: string }> | string[] }>(
     'GET',
