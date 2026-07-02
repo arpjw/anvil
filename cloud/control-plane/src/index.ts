@@ -10,6 +10,7 @@ import { createStripeClient } from './lib/stripe';
 import { logger } from './lib/logger';
 import { createBroadcaster } from './events/broadcaster';
 import { makeRedisStore } from './middleware/rate-limit';
+import { vmPoolManager } from './vm/pool-manager';
 import type { StripeClient } from './lib/context';
 
 async function main() {
@@ -88,6 +89,18 @@ async function main() {
   });
 
   logger.info({ port: server.port, dashboardOrigin }, 'control plane listening');
+
+  // Warm the VM pool. It stays warm across sessions to make cold-start feel instant.
+  vmPoolManager.start();
+
+  const shutdown = async (signal: string): Promise<void> => {
+    logger.info({ signal }, 'shutting down');
+    await vmPoolManager.stop();
+    server.stop?.();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 main().catch((err) => {

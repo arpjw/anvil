@@ -7,6 +7,7 @@ import { logger } from '../lib/logger';
 import type { AppDeps, AppEnv } from '../lib/context';
 import { SESSION_STATUSES, type SessionStatus, type Session, type Repo, type User } from '../db/schema';
 import { sessionPool } from '../vm/pool';
+import { vmPoolManager } from '../vm/pool-manager';
 import { provisionSession, ProvisionError } from '../vm/provisioner';
 import { startEventRelay, type EventRelaySocket } from '../vm/event-relay';
 import { getVMDriver } from '../vm';
@@ -185,10 +186,14 @@ export function sessionsRoutes(): Hono<AppEnv> {
       }
     }
     try {
-      await getVMDriver().stopVM(id);
+      await vmPoolManager.release(id);
     } catch (err) {
-      logger.warn({ sessionId: id, err }, 'failed to stop vm on abort');
+      logger.warn({ sessionId: id, err }, 'failed to release vm on abort');
     }
+    // Best-effort direct stop (in case the VM was never tracked by the pool).
+    try {
+      await getVMDriver().stopVM(id);
+    } catch { /* already released */ }
     sessionPool.remove(id);
     releaseProvision(user.id, id);
 

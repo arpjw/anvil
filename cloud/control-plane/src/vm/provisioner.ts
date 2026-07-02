@@ -2,6 +2,7 @@ import type { Repo, Session, User } from '../db/schema';
 import type { AppDeps } from '../lib/context';
 import { logger } from '../lib/logger';
 import { getVMDriver } from './index';
+import { vmPoolManager, VMPoolManager } from './pool-manager';
 import type { VMDriver, VMHandle } from './types';
 
 export class ProvisionError extends Error {
@@ -36,6 +37,7 @@ export interface ProvisionDeps {
   wsFactory?: WebSocketFactory;
   appDeps: AppDeps;
   timeoutMs?: number;
+  pool?: VMPoolManager;
 }
 
 export interface ProvisionInput {
@@ -132,6 +134,15 @@ export async function provisionSession(
   const wsFactory = pdeps.wsFactory ?? defaultWsFactory;
   const timeoutMs = pdeps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+  // If the caller passed an explicit driver but no pool, use a driver-scoped
+  // pool so the injected driver is respected end-to-end. Otherwise fall through
+  // to the shared singleton, which is the production path.
+  const effectivePool =
+    pdeps.pool ??
+    (pdeps.driver
+      ? new VMPoolManager({ targetSize: 0, driver: pdeps.driver })
+      : vmPoolManager);
+
   const { session, repo, user } = input;
 
   let vmHandle: VMHandle | null = null;
@@ -147,9 +158,9 @@ export async function provisionSession(
     }
     if (vmHandle) {
       try {
-        await driver.stopVM(session.id);
+        await effectivePool.release(session.id);
       } catch (err) {
-        logger.warn({ sessionId: session.id, err }, 'failed to stop vm during cleanup');
+        logger.warn({ sessionId: session.id, err }, 'failed to release vm during cleanup');
       }
     }
     try {
@@ -161,7 +172,7 @@ export async function provisionSession(
 
   try {
     vmHandle = await withTimeout(
-      driver.startVM(session.id),
+      effectivePool.acquire(session.id),
       timeoutMs,
       'timed out starting vm',
     );
