@@ -3,6 +3,35 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session 11 — July 2, 2026
+**Phase:** 11 — Distribution
+**Duration:** ~20m
+
+### What was accomplished
+- Rediscovered that most of Phase 11 shipped earlier (init / doctor / config / auto LSP
+  install / slash commands / GitHub Actions example / headless mode all present under
+  src/setup and src/execution). Marked those items done in BUILDPLAN.
+- Added the missing pieces: --version flag + src/setup/version.ts (walks up from
+  dist/setup or src/setup to find package.json; falls back to 'unknown'); bun compile
+  scripts in package.json for darwin-arm64/x64, linux-x64, windows-x64 (single
+  self-contained binaries via bun build --compile).
+- README install section rewritten: npm / prebuilt binary / from-source with
+  post-install verify commands (anvilai --version, anvilai doctor).
+
+### Checks
+- npx tsc --noEmit clean.
+- npx tsx src/index.ts --version → 1.0.3.
+
+### State of codebase at close
+- Every BUILDPLAN box for Phase 11 checked except "Test: fresh machine…", which is a
+  manual smoke test that needs a clean environment.
+
+### Next session should start with
+- Actually running the fresh-machine smoke test in a Docker container, then bumping
+  version + publishing to npm.
+
+---
+
 ## Session C8 — July 2, 2026
 **Phase:** C8 — Polish + Launch
 **Duration:** ~1h

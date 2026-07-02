@@ -16,6 +16,7 @@ const noVerify      = argv.includes('--no-verify');
 const isRollback    = argv[0] === '--rollback';
 const isResume      = argv[0] === '--resume';
 const showCommands  = argv.includes('--commands');
+const showVersion   = argv.includes('--version') || argv[0] === '-V';
 
 // Extract --image <filepath>
 let imagePath: string | null = null;
@@ -42,6 +43,13 @@ const positional = argv.filter((a, i) => {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+
+  // ── --version ────────────────────────────────────────────────────────────────
+  if (showVersion) {
+    const { getPackageVersion } = await import('./setup/version.js');
+    console.log(getPackageVersion());
+    return;
+  }
 
   // ── anvil init ───────────────────────────────────────────────────────────────
   if (positional[0] === 'init') {
@@ -180,6 +188,7 @@ async function main(): Promise<void> {
     console.error('  --dry-run                Plan only — print plan, do not execute');
     console.error('  --no-verify              Skip post-execution verification pass');
     console.error('  --commands               List available slash commands');
+    console.error('  --version                Print the installed anvil-agent version');
     console.error('\nEnv: API key for the selected model must be set');
     process.exit(1);
   }

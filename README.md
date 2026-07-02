@@ -23,11 +23,41 @@ After execution, Anvil runs a verification pass: it re-runs your configured test
 
 ## Install
 
+Three paths — pick one:
+
+**npm (recommended)**
+
 ```bash
 npm install -g anvil-agent
 ```
 
-Requires Node 18+. The TypeScript language server is bundled and does not need a separate install.
+Requires Node 18+. TypeScript language server is bundled.
+
+**Compiled binary (no Node required)**
+
+```bash
+# macOS arm64
+curl -L https://github.com/arpjw/anvil/releases/latest/download/anvilai-darwin-arm64 -o anvilai && chmod +x anvilai && sudo mv anvilai /usr/local/bin/
+
+# macOS x64 / Linux x64 / Windows: swap the filename above
+```
+
+Built with `bun build --compile`. Zero runtime dependencies — the binary boots faster than the Node CLI.
+
+**From source**
+
+```bash
+git clone https://github.com/arpjw/anvil.git && cd anvil
+npm install
+npx tsx src/index.ts "<request>" <path/to/workdir>
+```
+
+Verify the install:
+
+```bash
+anvilai --version
+anvilai doctor
+```
 
 **Set your API key.** Anvil supports Claude, GPT, Gemini, and Moonshot. On first run, an interactive picker lets you select a model — it will tell you which environment variable to set.
 

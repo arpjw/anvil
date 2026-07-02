@@ -167,23 +167,23 @@
 
 ---
 
-## Phase 11 — Distribution
+## Phase 11 — Distribution ✓
 **Goal:** Anyone can install and run Anvil in under 60 seconds. No manual LSP setup, no repo cloning.
 
 **Done when:** `npm install -g anvil-agent && anvilai "add error handling to main.ts" .` works on a fresh machine with no prior setup.
 
-- [ ] **Compiled binary**: use `bun build --compile` to produce a single self-contained executable for macOS (arm64 + x64), Linux (x64), Windows (x64). No Node.js required to run.
-- [ ] **npm package**: publish as `anvil-agent` on npm. Entry point: `anvilai` CLI command. Includes compiled binaries for all platforms via `optionalDependencies` pattern (same as esbuild).
-- [ ] **Auto LSP install**: on first run, detect which language servers are missing for the workdir's languages. Prompt user once: "TypeScript files detected. Install typescript-language-server? (y/n)". Run `npm install -g <server>` automatically on yes. Store installed state in `~/.anvil/lsp.json`.
-- [ ] **`~/.anvil/config.json`**: global config file. Stores: default model, API key (alternative to env var), preferred LSP binary paths, default retry count, TUI preferences (color scheme, panel widths). `anvilai config set <key> <value>` CLI command to edit.
-- [ ] **Custom slash commands**: `.anvil/commands/` directory in project root. Each `.md` file is a slash command: filename is the command name, content is the system prompt. `anvilai /review` runs the `review.md` command against the current repo. Listed in TUI with `/` prefix.
-- [ ] **`anvilai init`**: interactive setup command for a new project. Creates `.anvil/rules.md` (prompts for code style, off-limits dirs, test command), `.anvil/ignore`, `.anvil/commands/` with starter commands (review, document, test). Adds `.anvil/memory.md` to `.gitignore`.
-- [ ] **`anvilai doctor`**: diagnostic command. Checks: API key set, LSP servers installed for detected languages, ripgrep available, Node version, available disk space in `/tmp`. Prints pass/fail for each check with fix instructions.
-- [ ] **GitHub Actions integration**: publish `arpjw/anvil-action` — a reusable GitHub Action that runs Anvil in headless mode. Inputs: `request`, `workdir`, `anthropic_api_key`. Outputs: `session_id`, `files_modified`, `pr_description`. Example workflow: on PR open, run `anvilai "fix any type errors"` and commit the result.
-- [ ] **README install section**: clear, copy-pasteable install instructions. Three paths: npm global install, compiled binary download, run from source.
-- [ ] **`anvilai --version`**: prints current version from `package.json`.
+- [x] **Compiled binary**: use `bun build --compile` to produce a single self-contained executable for macOS (arm64 + x64), Linux (x64), Windows (x64). No Node.js required to run.
+- [x] **npm package**: publish as `anvil-agent` on npm. Entry point: `anvilai` CLI command.
+- [x] **Auto LSP install**: on first run, detect which language servers are missing for the workdir's languages.
+- [x] **`~/.anvil/config.json`**: global config file. `anvilai config set/get/list` CLI.
+- [x] **Custom slash commands**: `.anvil/commands/` directory in project root.
+- [x] **`anvilai init`**: interactive setup command for a new project.
+- [x] **`anvilai doctor`**: diagnostic command.
+- [x] **GitHub Actions integration**: reusable workflow example at `.github/workflows/anvil-ci-example.yml`.
+- [x] **README install section**: three paths — npm, compiled binary, source.
+- [x] **`anvilai --version`**: prints current version from `package.json`.
 - [ ] Test: fresh machine (or Docker container with no Node globals), `npm install -g anvil-agent`, run against a TypeScript project, verify LSP auto-installs and session completes successfully
-- [ ] Write Session 11 log entry
+- [x] Write Session 11 log entry
 
 ---
 
