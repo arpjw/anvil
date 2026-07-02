@@ -15,6 +15,13 @@
       "when": 1783031206019,
       "tag": "0001_black_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783031555148,
+      "tag": "0002_aspiring_mathemanic",
+      "breakpoints": true
     }
   ]
 }

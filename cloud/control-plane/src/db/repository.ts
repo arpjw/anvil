@@ -1,19 +1,22 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   diffs,
   events,
   repos,
   sessions,
+  usageRecords,
   users,
   type Diff,
   type DiffStatus,
   type Event,
   type NewSession,
+  type PlanTier,
   type PrState,
   type Repo,
   type Session,
   type SessionStatus,
+  type UsageRecord,
   type User,
 } from './schema';
 import * as schema from './schema';
@@ -69,6 +72,20 @@ export interface Repository {
     payload: unknown,
   ): Promise<Event>;
   getRecentEvents(sessionId: string, limit: number): Promise<Event[]>;
+
+  setUserStripeCustomer(userId: string, customerId: string): Promise<User>;
+  setUserSubscription(
+    userId: string,
+    fields: { subscriptionId: string; planTier: PlanTier },
+  ): Promise<User>;
+  createUsageRecord(input: {
+    userId: string;
+    sessionId: string;
+    minutes: number;
+  }): Promise<UsageRecord>;
+  markUsageReported(id: string): Promise<UsageRecord>;
+  listUnreportedUsage(userId: string): Promise<UsageRecord[]>;
+  listUsageBySince(userId: string, since: Date): Promise<UsageRecord[]>;
 
   listDiffsBySession(sessionId: string): Promise<Diff[]>;
   findDiffById(id: string): Promise<Diff | null>;
@@ -332,6 +349,77 @@ export function createPgRepository(
         .where(eq(events.sessionId, sessionId))
         .orderBy(desc(events.createdAt))
         .limit(limit);
+    },
+
+    async setUserStripeCustomer(userId, customerId) {
+      const [row] = await db
+        .update(users)
+        .set({ stripeCustomerId: customerId })
+        .where(eq(users.id, userId))
+        .returning();
+      if (!row) throw new Error('user not found');
+      return row;
+    },
+
+    async setUserSubscription(userId, fields) {
+      const [row] = await db
+        .update(users)
+        .set({
+          stripeSubscriptionId: fields.subscriptionId,
+          planTier: fields.planTier,
+        })
+        .where(eq(users.id, userId))
+        .returning();
+      if (!row) throw new Error('user not found');
+      return row;
+    },
+
+    async createUsageRecord(input) {
+      const [row] = await db
+        .insert(usageRecords)
+        .values({
+          userId: input.userId,
+          sessionId: input.sessionId,
+          minutes: input.minutes,
+        })
+        .returning();
+      if (!row) throw new Error('failed to create usage record');
+      return row;
+    },
+
+    async markUsageReported(id) {
+      const [row] = await db
+        .update(usageRecords)
+        .set({ reportedAt: new Date() })
+        .where(eq(usageRecords.id, id))
+        .returning();
+      if (!row) throw new Error('usage record not found');
+      return row;
+    },
+
+    async listUnreportedUsage(userId) {
+      return db
+        .select()
+        .from(usageRecords)
+        .where(
+          and(
+            eq(usageRecords.userId, userId),
+            sql`${usageRecords.reportedAt} is null`,
+          ),
+        );
+    },
+
+    async listUsageBySince(userId, since) {
+      return db
+        .select()
+        .from(usageRecords)
+        .where(
+          and(
+            eq(usageRecords.userId, userId),
+            sql`${usageRecords.createdAt} >= ${since}`,
+          ),
+        )
+        .orderBy(desc(usageRecords.createdAt));
     },
 
     async listDiffsBySession(sessionId) {

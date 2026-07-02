@@ -175,5 +175,33 @@ export async function openPullRequest(
   return request<OpenPrResult>('POST', `/sessions/${sessionId}/pr`);
 }
 
+export interface UsageResponse {
+  period: { start: string; end: string | null };
+  minutes: number;
+  records: Array<{
+    id: string;
+    sessionId: string;
+    minutes: number;
+    createdAt: string;
+    reportedAt: string | null;
+  }>;
+  planTier: 'free' | 'pro' | 'team';
+  freeMinutesPerMonth: number;
+}
+
+export async function getUsage(): Promise<UsageResponse> {
+  return request<UsageResponse>('GET', '/billing/usage');
+}
+
+export async function startCheckout(
+  plan: 'pro' | 'team',
+): Promise<{ url: string }> {
+  return request<{ url: string }>('POST', '/billing/checkout', { plan });
+}
+
+export async function openBillingPortal(): Promise<{ url: string }> {
+  return request<{ url: string }>('POST', '/billing/portal');
+}
+
 export type { Diff, Repo, Session, SessionDetail } from './types';
 export type { UIEvent } from './types';

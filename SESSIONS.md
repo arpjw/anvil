@@ -3,6 +3,50 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session C7 — July 2, 2026
+**Phase:** C7 — Billing
+**Duration:** ~1h
+
+### What was accomplished
+- StripeClient interface + real thin wrapper over Stripe REST API (createCustomer,
+  reportUsage on subscription item, createCheckoutSession, createPortalSession,
+  parseWebhook with HMAC-SHA256 t/v1 signature + 5-min tolerance) in lib/stripe.ts.
+- Schema: users gets stripe_subscription_id + plan_tier ('free'|'pro'|'team'). New
+  usage_records table (user_id, session_id, minutes, reported_at). Migration 0002.
+- Pipeline.recordUsage: on session complete, ceil(durationSeconds/60) minutes, insert
+  usage_records row, best-effort report to Stripe if a subscription item is configured
+  for the user, mark reported_at. Idempotency key = usage-<record.id>.
+- Routes: GET /api/v1/billing/usage (current month, list + total), POST /billing/checkout
+  (creates or reuses customer, returns hosted Checkout URL), POST /billing/portal
+  (returns Billing Portal URL). POST /webhooks/stripe (checkout.session.completed →
+  set plan_tier=pro; customer.subscription.deleted → downgrade to free).
+- Repository: setUserStripeCustomer, setUserSubscription, createUsageRecord,
+  markUsageReported, listUnreportedUsage, listUsageBySince. Full memory-repo parity.
+- Test harness: StripeStubHandle w/ recording lists for customers/reported usage/checkout
+  URLs. AppDeps gained stripe + billing config; vm.test.ts and default harness updated.
+- Dashboard: /settings/billing with current-period usage stat, pro/team plan cards,
+  per-session usage history, Stripe portal deep link. Nav has a "Billing" link.
+- Stripe billing config comes from env: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+  STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM. Absent env keeps the whole feature disabled
+  cleanly (deps.stripe is null → routes 503).
+- 6 new tests: usage sums + free default, checkout creates-or-reuses customer +
+  correct priceId, webhook upgrade / downgrade.
+
+### Checks
+- control-plane: bunx tsc clean, bun test 80/80 (was 74, added 6 billing tests).
+- dashboard: tsc clean, next build clean w/ new /settings/billing route.
+
+### State of codebase at close
+- Full billing loop: session runs → duration recorded → usage inserted → optional Stripe
+  usage report → dashboard reflects minutes in near-real-time. Users can upgrade via
+  Stripe Checkout and manage via portal.
+
+### Next session should start with
+- Phase C8: waitlist landing, onboarding flow, rate limiting on POST /sessions and
+  POST /repos, abuse prevention (VM caps + suspicious-pattern detection), docs.
+
+---
+
 ## Session C6 — July 2, 2026
 **Phase:** C6 — GitHub Integration
 **Duration:** ~1h

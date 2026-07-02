@@ -6,8 +6,10 @@ import { createPgRepository } from './db/repository';
 import { migrate } from './db/migrate';
 import { createClerkVerifyToken } from './middleware/auth';
 import { octokitGithubClient } from './lib/github';
+import { createStripeClient } from './lib/stripe';
 import { logger } from './lib/logger';
 import { createBroadcaster } from './events/broadcaster';
+import type { StripeClient } from './lib/context';
 
 async function main() {
   const port = Number(process.env.PORT ?? 3001);
@@ -38,11 +40,37 @@ async function main() {
   const repo = createPgRepository(db);
   const verifyToken = createClerkVerifyToken(clerkSecret);
 
+  let stripe: StripeClient | null = null;
+  if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET) {
+    stripe = createStripeClient(
+      process.env.STRIPE_SECRET_KEY,
+      process.env.STRIPE_WEBHOOK_SECRET,
+    );
+  }
+
   const app = createApp({
     deps: {
       repo,
       verifyToken,
       githubClient: octokitGithubClient,
+      stripe,
+      billing: {
+        freeMinutesPerMonth: Number(process.env.FREE_MINUTES_PER_MONTH ?? 60),
+        usageSubscriptionItemPerUser: new Map(),
+        priceIds: {
+          pro: process.env.STRIPE_PRICE_PRO ?? '',
+          team: process.env.STRIPE_PRICE_TEAM ?? '',
+        },
+        successUrl:
+          process.env.STRIPE_SUCCESS_URL ??
+          `${dashboardOrigin}/settings/billing?checkout=ok`,
+        cancelUrl:
+          process.env.STRIPE_CANCEL_URL ??
+          `${dashboardOrigin}/settings/billing?checkout=cancel`,
+        portalReturnUrl:
+          process.env.STRIPE_PORTAL_RETURN_URL ??
+          `${dashboardOrigin}/settings/billing`,
+      },
       redis,
       broadcaster,
     },

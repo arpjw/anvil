@@ -10,6 +10,7 @@ import { sessionsRoutes } from './routes/sessions';
 import { diffsRoutes } from './routes/diffs';
 import { prRoutes } from './routes/pr';
 import { githubRoutes, githubWebhookRoutes } from './routes/github';
+import { billingRoutes, stripeWebhookRoutes } from './routes/billing';
 import { requireAuth } from './middleware/auth';
 import { sseHandler } from './events/sse';
 
@@ -84,12 +85,14 @@ export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
   app.route('/api/v1', diffsRoutes());
   app.route('/api/v1', prRoutes());
   app.route('/api/v1/github', githubRoutes());
+  app.route('/api/v1/billing', billingRoutes());
   if (opts.githubWebhookSecret) {
     app.route(
       '/webhooks',
       githubWebhookRoutes({ webhookSecret: opts.githubWebhookSecret }),
     );
   }
+  app.route('/webhooks', stripeWebhookRoutes());
 
   app.onError((err, c) => {
     const requestId = c.get('requestId') ?? 'unknown';

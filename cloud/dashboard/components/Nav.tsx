@@ -48,6 +48,13 @@ export function Nav() {
           >
             Repos
           </Link>
+          <Link
+            href="/settings/billing"
+            className="text-sm"
+            style={{ color: '#6b7280' }}
+          >
+            Billing
+          </Link>
           <UserButton
             appearance={{
               elements: {

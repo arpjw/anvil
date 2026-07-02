@@ -71,7 +71,22 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
   });
   const redis = new FakeRedis();
   const broadcaster = new SSEBroadcaster(redis);
-  return { repo, verifyToken, githubClient, redis, broadcaster };
+  return {
+    repo,
+    verifyToken,
+    githubClient,
+    stripe: null,
+    billing: {
+      freeMinutesPerMonth: 60,
+      usageSubscriptionItemPerUser: new Map(),
+      priceIds: { pro: 'p', team: 't' },
+      successUrl: '',
+      cancelUrl: '',
+      portalReturnUrl: '',
+    },
+    redis,
+    broadcaster,
+  };
 }
 
 describe('DockerDriver.startVM', () => {

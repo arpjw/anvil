@@ -12,10 +12,12 @@ import type {
   DiffStatus,
   Event,
   NewSession,
+  PlanTier,
   PrState,
   Repo,
   Session,
   SessionStatus,
+  UsageRecord,
   User,
 } from '../db/schema';
 
@@ -31,12 +33,14 @@ export function createMemoryRepository(): Repository & {
   _sessions: Map<string, Session>;
   _events: Map<string, Event>;
   _diffs: Map<string, Diff>;
+  _usage: Map<string, UsageRecord>;
 } {
   const usersById = new Map<string, User>();
   const reposById = new Map<string, Repo>();
   const sessionsById = new Map<string, Session>();
   const eventsById = new Map<string, Event>();
   const diffsById = new Map<string, Diff>();
+  const usageById = new Map<string, UsageRecord>();
 
   return {
     _users: usersById,
@@ -44,6 +48,7 @@ export function createMemoryRepository(): Repository & {
     _sessions: sessionsById,
     _events: eventsById,
     _diffs: diffsById,
+    _usage: usageById,
 
     async findUserByClerkId(clerkId) {
       for (const user of usersById.values()) {
@@ -63,6 +68,8 @@ export function createMemoryRepository(): Repository & {
         githubLogin: null,
         githubAccessToken: null,
         stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        planTier: 'free',
         freeMinutesUsed: 0,
         createdAt: new Date(),
       };
@@ -264,6 +271,63 @@ export function createMemoryRepository(): Repository & {
         .slice(0, limit);
     },
 
+    async setUserStripeCustomer(userId, customerId) {
+      const existing = usersById.get(userId);
+      if (!existing) throw new Error('user not found');
+      const next: User = { ...existing, stripeCustomerId: customerId };
+      usersById.set(userId, next);
+      return next;
+    },
+
+    async setUserSubscription(userId, fields) {
+      const existing = usersById.get(userId);
+      if (!existing) throw new Error('user not found');
+      const next: User = {
+        ...existing,
+        stripeSubscriptionId: fields.subscriptionId,
+        planTier: fields.planTier,
+      };
+      usersById.set(userId, next);
+      return next;
+    },
+
+    async createUsageRecord(input) {
+      const rec: UsageRecord = {
+        id: uuid(),
+        userId: input.userId,
+        sessionId: input.sessionId,
+        minutes: input.minutes,
+        reportedAt: null,
+        createdAt: new Date(),
+      };
+      usageById.set(rec.id, rec);
+      return rec;
+    },
+
+    async markUsageReported(id) {
+      const existing = usageById.get(id);
+      if (!existing) throw new Error('usage record not found');
+      const next: UsageRecord = { ...existing, reportedAt: new Date() };
+      usageById.set(id, next);
+      return next;
+    },
+
+    async listUnreportedUsage(userId) {
+      const out: UsageRecord[] = [];
+      for (const r of usageById.values()) {
+        if (r.userId === userId && r.reportedAt === null) out.push(r);
+      }
+      return out;
+    },
+
+    async listUsageBySince(userId, since) {
+      const out: UsageRecord[] = [];
+      for (const r of usageById.values()) {
+        if (r.userId === userId && r.createdAt >= since) out.push(r);
+      }
+      return out.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
+
     async listDiffsBySession(sessionId) {
       const out: Diff[] = [];
       for (const d of diffsById.values()) {
@@ -293,6 +357,66 @@ export function createMemoryRepository(): Repository & {
         }
       }
       return count;
+    },
+  };
+}
+
+export interface StripeStub {
+  createdCustomers: Array<{ email?: string; metadata?: Record<string, string>; id: string }>;
+  reportedUsage: Array<{ subscriptionItemId: string; quantity: number; idempotencyKey: string }>;
+  checkoutSessions: Array<{ customerId: string; priceId: string; url: string }>;
+  portalSessions: Array<{ customerId: string; url: string }>;
+  nextCustomerId: number;
+  nextCheckoutUrl: string;
+  nextPortalUrl: string;
+  webhookEvents: Array<{ type: string; data: Record<string, unknown> }>;
+}
+
+export interface StripeStubHandle {
+  stub: StripeStub;
+  client: import('../lib/context').StripeClient;
+}
+
+export function createStripeStub(): StripeStubHandle {
+  const stub: StripeStub = {
+    createdCustomers: [],
+    reportedUsage: [],
+    checkoutSessions: [],
+    portalSessions: [],
+    nextCustomerId: 1,
+    nextCheckoutUrl: 'https://stripe.example/checkout',
+    nextPortalUrl: 'https://stripe.example/portal',
+    webhookEvents: [],
+  };
+  return {
+    stub,
+    client: {
+      async createCustomer(input) {
+        const id = `cus_${stub.nextCustomerId++}`;
+        stub.createdCustomers.push({ ...input, id });
+        return { id };
+      },
+      async reportUsage(input) {
+        stub.reportedUsage.push(input);
+      },
+      async createCheckoutSession({ customerId, priceId }) {
+        stub.checkoutSessions.push({ customerId, priceId, url: stub.nextCheckoutUrl });
+        return { url: stub.nextCheckoutUrl };
+      },
+      async createPortalSession({ customerId }) {
+        stub.portalSessions.push({ customerId, url: stub.nextPortalUrl });
+        return { url: stub.nextPortalUrl };
+      },
+      async parseWebhook(rawBody) {
+        try {
+          const parsed = JSON.parse(rawBody) as { type: string; data: Record<string, unknown> };
+          stub.webhookEvents.push(parsed);
+          return parsed;
+        } catch {
+          const { HttpError } = await import('../lib/errors');
+          throw new HttpError(400, 'bad_body', 'invalid json');
+        }
+      },
     },
   };
 }
@@ -422,6 +546,7 @@ export type Harness = {
   repo: ReturnType<typeof createMemoryRepository>;
   tokens: TokenMap;
   github: StubbedGithub;
+  stripe: StripeStub;
   deps: AppDeps;
   redis: FakeRedis;
   broadcaster: SSEBroadcaster;
@@ -490,10 +615,20 @@ export function createHarness(): Harness {
   const redis = new FakeRedis();
   const broadcaster = new SSEBroadcaster(redis);
 
+  const stripe = createStripeStub();
   const deps: AppDeps = {
     repo,
     verifyToken: createVerifyTokenStub(tokens),
     githubClient: createGithubStub(github),
+    stripe: stripe.client,
+    billing: {
+      freeMinutesPerMonth: 60,
+      usageSubscriptionItemPerUser: new Map(),
+      priceIds: { pro: 'price_pro', team: 'price_team' },
+      successUrl: 'https://app.local/billing/success',
+      cancelUrl: 'https://app.local/billing/cancel',
+      portalReturnUrl: 'https://app.local/settings/billing',
+    },
     redis,
     broadcaster,
   };
@@ -522,5 +657,15 @@ export function createHarness(): Harness {
     );
   };
 
-  return { app, repo, tokens, github, deps, redis, broadcaster, authedFetch };
+  return {
+    app,
+    repo,
+    tokens,
+    github,
+    stripe: stripe.stub,
+    deps,
+    redis,
+    broadcaster,
+    authedFetch,
+  };
 }

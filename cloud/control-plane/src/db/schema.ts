@@ -14,6 +14,8 @@ export const users = pgTable('users', {
   githubLogin: text('github_login'),
   githubAccessToken: text('github_access_token'),
   stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  planTier: text('plan_tier').notNull().default('free'),
   freeMinutesUsed: integer('free_minutes_used').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
@@ -83,8 +85,27 @@ export const diffs = pgTable('diffs', {
     .defaultNow(),
 });
 
+export const usageRecords = pgTable('usage_records', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  sessionId: uuid('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
+  minutes: integer('minutes').notNull(),
+  reportedAt: timestamp('reported_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type UsageRecord = typeof usageRecords.$inferSelect;
+export type NewUsageRecord = typeof usageRecords.$inferInsert;
+export const PLAN_TIERS = ['free', 'pro', 'team'] as const;
+export type PlanTier = (typeof PLAN_TIERS)[number];
 export type Repo = typeof repos.$inferSelect;
 export type NewRepo = typeof repos.$inferInsert;
 export type Session = typeof sessions.$inferSelect;

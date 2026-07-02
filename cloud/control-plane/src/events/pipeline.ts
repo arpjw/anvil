@@ -111,6 +111,9 @@ export async function processEvent(
         Math.round((completedAt.getTime() - opts.startedAt) / 1000),
       );
       await repo.completeSession(sessionId, { completedAt, durationSeconds });
+      if (opts.deps) {
+        await recordUsage(sessionId, durationSeconds, opts.deps);
+      }
     }
     if (next === 'complete' && opts.autoOpenPr && opts.deps) {
       await maybeOpenPr(sessionId, opts.deps);
@@ -120,6 +123,36 @@ export async function processEvent(
       { sessionId, from: current, to: next, err },
       'failed to update session status',
     );
+  }
+}
+
+async function recordUsage(
+  sessionId: string,
+  durationSeconds: number,
+  deps: AppDeps,
+): Promise<void> {
+  try {
+    const session = await deps.repo.findSessionById(sessionId);
+    if (!session) return;
+    const minutes = Math.max(1, Math.ceil(durationSeconds / 60));
+    const record = await deps.repo.createUsageRecord({
+      userId: session.userId,
+      sessionId,
+      minutes,
+    });
+    if (!deps.stripe) return;
+    const subscriptionItemId = deps.billing.usageSubscriptionItemPerUser.get(
+      session.userId,
+    );
+    if (!subscriptionItemId) return;
+    await deps.stripe.reportUsage({
+      subscriptionItemId,
+      quantity: minutes,
+      idempotencyKey: `usage-${record.id}`,
+    });
+    await deps.repo.markUsageReported(record.id);
+  } catch (err) {
+    logger.warn({ sessionId, err }, 'usage record / report failed');
   }
 }
 

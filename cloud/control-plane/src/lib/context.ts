@@ -57,12 +57,49 @@ export type GithubClientFactory = (
   accessToken: string | null | undefined,
 ) => GithubClient;
 
+export type StripeClient = {
+  createCustomer: (input: {
+    email?: string;
+    metadata?: Record<string, string>;
+  }) => Promise<{ id: string }>;
+  reportUsage: (input: {
+    subscriptionItemId: string;
+    quantity: number;
+    idempotencyKey: string;
+  }) => Promise<void>;
+  createCheckoutSession: (input: {
+    customerId: string;
+    priceId: string;
+    successUrl: string;
+    cancelUrl: string;
+  }) => Promise<{ url: string }>;
+  createPortalSession: (input: {
+    customerId: string;
+    returnUrl: string;
+  }) => Promise<{ url: string }>;
+  parseWebhook: (
+    rawBody: string,
+    signature: string,
+  ) => Promise<{ type: string; data: Record<string, unknown> }>;
+};
+
 export type AppDeps = {
   repo: Repository;
   verifyToken: VerifyTokenFn;
   githubClient: GithubClientFactory;
+  stripe: StripeClient | null;
+  billing: BillingConfig;
   redis: RedisPublisher;
   broadcaster: SSEBroadcaster;
+};
+
+export type BillingConfig = {
+  freeMinutesPerMonth: number;
+  usageSubscriptionItemPerUser: Map<string, string>;
+  priceIds: Record<'pro' | 'team', string>;
+  successUrl: string;
+  cancelUrl: string;
+  portalReturnUrl: string;
 };
 
 export type AppEnv = {

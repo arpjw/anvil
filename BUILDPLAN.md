@@ -248,13 +248,13 @@
 
 ---
 
-## Phase C7 — Billing
+## Phase C7 — Billing ✓
 **Goal:** Stripe metered billing, VM minute tracking, usage dashboard, subscription management.
 
-- [ ] Stripe metered billing integration
-- [ ] VM minute tracking per session, reported to Stripe
-- [ ] Usage dashboard (current period, history)
-- [ ] Subscription management (plans, upgrade/downgrade, cancel)
+- [x] Stripe metered billing integration
+- [x] VM minute tracking per session, reported to Stripe
+- [x] Usage dashboard (current period, history)
+- [x] Subscription management (plans, upgrade/downgrade, cancel)
 
 ---
 
