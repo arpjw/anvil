@@ -6,10 +6,12 @@ import {
   abortSession,
   approveSession,
   getSession,
+  openPullRequest,
   rejectSession,
 } from '@/lib/api';
 import { useSessionEvents } from '@/lib/sse';
 import { ActivityEvent } from '@/components/ActivityEvent';
+import { DiffReview } from '@/components/DiffReview';
 import { PlanApproval } from '@/components/PlanApproval';
 import { StatusBadge, statusColor, statusLabel } from '@/components/StatusBadge';
 import type {
@@ -48,7 +50,12 @@ export function SessionDetailView({ sessionId }: { sessionId: string }) {
   return (
     <div className="fixed inset-x-0 top-[52px] bottom-[40px] flex">
       <LeftPanel session={session} status={status} events={events} />
-      <RightPanel sessionId={sessionId} status={status} events={events} />
+      <RightPanel
+        sessionId={sessionId}
+        status={status}
+        events={events}
+        session={session}
+      />
       <StatusBar session={session} status={status} />
     </div>
   );
@@ -239,17 +246,50 @@ function StatusHint({ color, children }: { color: string; children: React.ReactN
   );
 }
 
+type Tab = 'activity' | 'diffs';
+
 function RightPanel({
   sessionId,
   status,
   events,
+  session,
 }: {
   sessionId: string;
   status: SessionStatus;
   events: UIEvent[];
+  session: SessionDetail;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
+  const [tab, setTab] = useState<Tab>('activity');
+  const [prOpening, setPrOpening] = useState(false);
+  const [prUrl, setPrUrl] = useState<string | null>(session.prUrl);
+  const [prError, setPrError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (session.prUrl) setPrUrl(session.prUrl);
+  }, [session.prUrl]);
+
+  const hasDiffs = events.some((e) => e.type === 'diff_ready');
+
+  useEffect(() => {
+    if (hasDiffs && tab === 'activity' && status === 'reviewing') {
+      setTab('diffs');
+    }
+  }, [hasDiffs, status, tab]);
+
+  async function openPr() {
+    setPrOpening(true);
+    setPrError(null);
+    try {
+      const res = await openPullRequest(sessionId);
+      setPrUrl(res.prUrl);
+    } catch (err) {
+      setPrError((err as Error).message);
+    } finally {
+      setPrOpening(false);
+    }
+  }
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -325,11 +365,24 @@ function RightPanel({
         className="flex items-center justify-between px-5 h-11 shrink-0"
         style={{ borderBottom: '1px solid #1f1f1f', backgroundColor: '#0a0a0a' }}
       >
-        <div className="flex items-baseline gap-3">
-          <span className="text-sm font-medium">Activity</span>
-          <span className="text-xs font-mono" style={{ color: '#6b7280' }}>
-            {events.length} {events.length === 1 ? 'event' : 'events'}
-          </span>
+        <div className="flex items-baseline gap-4">
+          <TabButton
+            active={tab === 'activity'}
+            onClick={() => setTab('activity')}
+          >
+            Activity
+            <span className="ml-2 text-xs font-mono" style={{ color: '#6b7280' }}>
+              {events.length}
+            </span>
+          </TabButton>
+          {hasDiffs && (
+            <TabButton
+              active={tab === 'diffs'}
+              onClick={() => setTab('diffs')}
+            >
+              Diffs
+            </TabButton>
+          )}
         </div>
         {canAbort && (
           <button
@@ -344,42 +397,76 @@ function RightPanel({
           </button>
         )}
       </div>
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        className="flex-1 overflow-y-auto"
-      >
-        {events.map((e, idx) => {
-          if (e.type === 'plan_ready' && plan) {
-            return (
-              <PlanApproval
-                key={`plan-${idx}`}
-                plan={plan}
-                onApprove={approvePlan}
-                onReject={rejectPlan}
-                resolved={planResolved || status !== 'reviewing'}
-                resolution={
-                  planResolved
-                    ? planResolution
-                    : status === 'running'
-                      ? 'approved'
-                      : status === 'failed' || status === 'aborted'
-                        ? 'rejected'
-                        : null
-                }
-                pending={planPending}
-              />
-            );
-          }
-          return <ActivityEvent key={idx} event={e} />;
-        })}
-        {events.length === 0 && (
-          <div className="px-5 py-6 text-sm" style={{ color: '#6b7280' }}>
-            Waiting for the first event…
-          </div>
-        )}
-      </div>
+      {tab === 'activity' && (
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="flex-1 overflow-y-auto"
+        >
+          {events.map((e, idx) => {
+            if (e.type === 'plan_ready' && plan) {
+              return (
+                <PlanApproval
+                  key={`plan-${idx}`}
+                  plan={plan}
+                  onApprove={approvePlan}
+                  onReject={rejectPlan}
+                  resolved={planResolved || status !== 'reviewing'}
+                  resolution={
+                    planResolved
+                      ? planResolution
+                      : status === 'running'
+                        ? 'approved'
+                        : status === 'failed' || status === 'aborted'
+                          ? 'rejected'
+                          : null
+                  }
+                  pending={planPending}
+                />
+              );
+            }
+            return <ActivityEvent key={idx} event={e} />;
+          })}
+          {events.length === 0 && (
+            <div className="px-5 py-6 text-sm" style={{ color: '#6b7280' }}>
+              Waiting for the first event…
+            </div>
+          )}
+        </div>
+      )}
+      {tab === 'diffs' && (
+        <DiffReview
+          sessionId={sessionId}
+          onOpenPr={openPr}
+          prOpening={prOpening}
+          prUrl={prUrl}
+          prError={prError}
+        />
+      )}
     </section>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-sm font-medium h-11 -mb-px border-b-2 transition-colors flex items-center"
+      style={{
+        color: active ? '#f0f0f0' : '#6b7280',
+        borderColor: active ? '#fbbf24' : 'transparent',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

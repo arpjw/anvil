@@ -54,6 +54,7 @@ export interface Repository {
     id: string,
     fields: { vmIp: string | null; vmPort: number | null },
   ): Promise<Session>;
+  updateSessionPrUrl(id: string, prUrl: string): Promise<Session>;
   completeSession(
     id: string,
     fields: { completedAt: Date; durationSeconds: number },
@@ -248,6 +249,16 @@ export function createPgRepository(
       const [row] = await db
         .update(sessions)
         .set({ vmIp: fields.vmIp, vmPort: fields.vmPort })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async updateSessionPrUrl(id, prUrl) {
+      const [row] = await db
+        .update(sessions)
+        .set({ prUrl })
         .where(eq(sessions.id, id))
         .returning();
       if (!row) throw new Error('session not found');

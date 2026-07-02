@@ -8,6 +8,7 @@ import { authRoutes } from './routes/auth';
 import { reposRoutes } from './routes/repos';
 import { sessionsRoutes } from './routes/sessions';
 import { diffsRoutes } from './routes/diffs';
+import { prRoutes } from './routes/pr';
 import { requireAuth } from './middleware/auth';
 import { sseHandler } from './events/sse';
 
@@ -79,6 +80,7 @@ export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
   app.route('/api/v1/repos', reposRoutes());
   app.route('/api/v1/sessions', sessionsRoutes());
   app.route('/api/v1', diffsRoutes());
+  app.route('/api/v1', prRoutes());
 
   app.onError((err, c) => {
     const requestId = c.get('requestId') ?? 'unknown';

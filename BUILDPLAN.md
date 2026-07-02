@@ -229,12 +229,12 @@
 
 ---
 
-## Phase C5 — Plan Approval + Diff Review
+## Phase C5 — Plan Approval + Diff Review ✓
 **Goal:** Plan approval UI in dashboard, per-hunk diff review UI, reusing Anvil's existing diff engine, PR creation via GitHub API.
 
-- [ ] Plan approval UI (renders plan.json, approve/revise actions)
-- [ ] Per-hunk diff review UI reusing Anvil's existing diff engine
-- [ ] PR creation via GitHub API on session complete
+- [x] Plan approval UI (renders plan.json, approve/revise actions)
+- [x] Per-hunk diff review UI reusing Anvil's existing diff engine
+- [x] PR creation via GitHub API on session complete
 
 ---
 

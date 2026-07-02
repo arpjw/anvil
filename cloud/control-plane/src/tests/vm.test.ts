@@ -54,6 +54,17 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
     async reposListBranches() {
       return [];
     },
+    async getBranchSha() {
+      return 'sha';
+    },
+    async createBranch() {},
+    async getFileSha() {
+      return null;
+    },
+    async putFile() {},
+    async createPullRequest() {
+      return { url: '', number: 0 };
+    },
   });
   const redis = new FakeRedis();
   const broadcaster = new SSEBroadcaster(redis);

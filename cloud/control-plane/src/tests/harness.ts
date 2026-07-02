@@ -201,6 +201,14 @@ export function createMemoryRepository(): Repository & {
       return next;
     },
 
+    async updateSessionPrUrl(id, prUrl) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = { ...existing, prUrl };
+      sessionsById.set(id, next);
+      return next;
+    },
+
     async completeSession(id, fields) {
       const existing = sessionsById.get(id);
       if (!existing) throw new Error('session not found');
@@ -268,32 +276,107 @@ export function createMemoryRepository(): Repository & {
   };
 }
 
+export interface StubbedPutFileCall {
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+  message: string;
+  content: string;
+  sha?: string | null;
+}
+
+export interface StubbedPrCall {
+  owner: string;
+  repo: string;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+}
+
 export type StubbedGithub = {
   getResponses: Map<string, { defaultBranch: string } | { error: number }>;
   branchResponses: Map<string, Array<{ name: string; sha: string }>>;
+  branchShas: Map<string, string>;
+  createdBranches: Array<{ owner: string; repo: string; branch: string; fromSha: string }>;
+  existingBranches: Set<string>;
+  fileShas: Map<string, string>;
+  putFileCalls: StubbedPutFileCall[];
+  prCalls: StubbedPrCall[];
+  prResponses: Map<string, { url: string; number: number }>;
+  lastToken: string | null | undefined;
 };
 
 export function createGithubStub(stub: StubbedGithub) {
-  return (_token: string | null | undefined): GithubClient => ({
-    async reposGet(owner, repo) {
-      const key = `${owner}/${repo}`;
-      const response = stub.getResponses.get(key);
-      if (!response) {
-        const { HttpError } = await import('../lib/errors');
-        throw new HttpError(404, 'repo_not_found', 'repo not accessible');
-      }
-      if ('error' in response) {
-        const { HttpError } = await import('../lib/errors');
-        throw new HttpError(404, 'repo_not_found', 'repo not accessible');
-      }
-      return response;
-    },
-    async reposListBranches(owner, repo) {
-      const key = `${owner}/${repo}`;
-      const branches = stub.branchResponses.get(key) ?? [];
-      return branches.map((b) => ({ name: b.name, commit: { sha: b.sha } }));
-    },
-  });
+  return (token: string | null | undefined): GithubClient => {
+    stub.lastToken = token;
+    return {
+      async reposGet(owner, repo) {
+        const key = `${owner}/${repo}`;
+        const response = stub.getResponses.get(key);
+        if (!response) {
+          const { HttpError } = await import('../lib/errors');
+          throw new HttpError(404, 'repo_not_found', 'repo not accessible');
+        }
+        if ('error' in response) {
+          const { HttpError } = await import('../lib/errors');
+          throw new HttpError(404, 'repo_not_found', 'repo not accessible');
+        }
+        return response;
+      },
+      async reposListBranches(owner, repo) {
+        const key = `${owner}/${repo}`;
+        const branches = stub.branchResponses.get(key) ?? [];
+        return branches.map((b) => ({ name: b.name, commit: { sha: b.sha } }));
+      },
+      async getBranchSha(owner, repo, branch) {
+        const key = `${owner}/${repo}/${branch}`;
+        const sha = stub.branchShas.get(key);
+        if (!sha) {
+          const { HttpError } = await import('../lib/errors');
+          throw new HttpError(404, 'repo_not_found', 'branch not found');
+        }
+        return sha;
+      },
+      async createBranch(owner, repo, branch, fromSha) {
+        const key = `${owner}/${repo}/${branch}`;
+        if (stub.existingBranches.has(key)) {
+          const { HttpError } = await import('../lib/errors');
+          throw new HttpError(
+            409,
+            'branch_exists',
+            `branch ${branch} already exists`,
+          );
+        }
+        stub.existingBranches.add(key);
+        stub.branchShas.set(key, fromSha);
+        stub.createdBranches.push({ owner, repo, branch, fromSha });
+      },
+      async getFileSha(owner, repo, path, branch) {
+        return stub.fileShas.get(`${owner}/${repo}/${branch}/${path}`) ?? null;
+      },
+      async putFile(owner, repo, args) {
+        stub.putFileCalls.push({ owner, repo, ...args });
+        stub.fileShas.set(
+          `${owner}/${repo}/${args.branch}/${args.path}`,
+          `sha-${stub.putFileCalls.length}`,
+        );
+      },
+      async createPullRequest(owner, repo, args) {
+        stub.prCalls.push({ owner, repo, ...args });
+        const key = `${owner}/${repo}`;
+        const response = stub.prResponses.get(key);
+        if (response) return response;
+        return {
+          url: `https://github.com/${owner}/${repo}/pull/${
+            stub.prCalls.length
+          }`,
+          number: stub.prCalls.length,
+        };
+      },
+    };
+  };
 }
 
 export type TokenMap = Map<string, { clerkId: string }>;
@@ -369,6 +452,14 @@ export function createHarness(): Harness {
   const github: StubbedGithub = {
     getResponses: new Map(),
     branchResponses: new Map(),
+    branchShas: new Map(),
+    createdBranches: [],
+    existingBranches: new Set(),
+    fileShas: new Map(),
+    putFileCalls: [],
+    prCalls: [],
+    prResponses: new Map(),
+    lastToken: undefined,
   };
   const redis = new FakeRedis();
   const broadcaster = new SSEBroadcaster(redis);

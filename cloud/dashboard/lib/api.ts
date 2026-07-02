@@ -150,5 +150,16 @@ export async function approveAllDiffs(
   );
 }
 
+export interface OpenPrResult {
+  prUrl: string;
+  session: Session;
+}
+
+export async function openPullRequest(
+  sessionId: string,
+): Promise<OpenPrResult> {
+  return request<OpenPrResult>('POST', `/sessions/${sessionId}/pr`);
+}
+
 export type { Diff, Repo, Session, SessionDetail } from './types';
 export type { UIEvent } from './types';

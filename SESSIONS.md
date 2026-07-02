@@ -3,6 +3,44 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session C5 — July 2, 2026
+**Phase:** C5 — Plan Approval + Diff Review
+**Duration:** ~1h
+
+### What was accomplished
+- Dashboard DiffReview.tsx: per-file cards, colored +/- hunks, per-file approve/reject,
+  Approve-all button, live status pills (pending/approved/rejected). Auto-selects the
+  Diffs tab when session enters reviewing with a diff_ready event.
+- Ported the src/diff/engine.ts semantics into cloud/dashboard/lib/diff-engine.ts
+  (generateDiff, applySelectedHunks, statsForHunks) — added `diff` + `@types/diff` deps.
+- SessionDetailView switched to Activity | Diffs tabs; Open-PR button gates on
+  approved > 0 && pending == 0.
+- Control plane: extended GithubClient with getBranchSha / createBranch / getFileSha /
+  putFile / createPullRequest (octokit implementation + stub in harness).
+- New POST /api/v1/sessions/:id/pr route (routes/pr.ts). Reads approved diffs, creates
+  anvil/session-<8chars> branch (idempotent if already exists), PUTs each file via
+  Contents API, opens PR, updates sessions.pr_url.
+- Repository interface: added updateSessionPrUrl (both pg + memory impl).
+- Wrote 4 new integration tests covering: successful PR w/ mixed diff statuses, no
+  approved diffs (400), idempotent branch reuse, 404 for cross-user access.
+
+### Checks
+- control-plane: bunx tsc clean, bun test 68/68 (was 64, added 4 PR tests).
+- dashboard: npx tsc clean, next build clean.
+
+### State of codebase at close
+- End-to-end review flow works: SSE-driven diff feed → user approves per-file → Open PR
+  button hits the octokit-backed endpoint → sessions.pr_url populated.
+- Diff engine is duplicated between src/diff/engine.ts (Anvil CLI) and
+  cloud/dashboard/lib/diff-engine.ts (browser) intentionally — the CLI can't share code
+  with the dashboard without a workspace, and the dashboard needs it in the browser bundle.
+
+### Next session should start with
+- Phase C6: repo picker with real GitHub repo listing on session create, VM-side clone
+  from the session branch, and webhook for PR merge/close status.
+
+---
+
 ## Session C4 — July 2, 2026
 **Phase:** C4 — Dashboard Core
 **Duration:** ~1h
