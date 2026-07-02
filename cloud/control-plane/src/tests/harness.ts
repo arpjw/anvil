@@ -187,6 +187,8 @@ export function createMemoryRepository(): Repository & {
         vmPort: input.vmPort ?? null,
         prUrl: input.prUrl ?? null,
         prState: input.prState ?? null,
+        checkpointPhase: input.checkpointPhase ?? null,
+        checkpointState: input.checkpointState ?? null,
         startedAt: input.startedAt ?? null,
         completedAt: input.completedAt ?? null,
         durationSeconds: input.durationSeconds ?? null,
@@ -240,6 +242,32 @@ export function createMemoryRepository(): Repository & {
         if (session.prUrl === prUrl) return session;
       }
       return null;
+    },
+
+    async checkpointSession(id, fields) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = {
+        ...existing,
+        checkpointPhase: fields.phase,
+        checkpointState: fields.state as Session['checkpointState'],
+      };
+      sessionsById.set(id, next);
+      return next;
+    },
+
+    async getSessionCheckpoint(id) {
+      const existing = sessionsById.get(id);
+      if (!existing || !existing.checkpointPhase) return null;
+      return { phase: existing.checkpointPhase, state: existing.checkpointState };
+    },
+
+    async clearSessionCheckpoint(id) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      const next: Session = { ...existing, checkpointPhase: null, checkpointState: null };
+      sessionsById.set(id, next);
+      return next;
     },
 
     async completeSession(id, fields) {

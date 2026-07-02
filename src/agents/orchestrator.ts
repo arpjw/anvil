@@ -24,12 +24,17 @@ import {
   WORKFLOW_TOTAL,
   WorkflowPhase,
   PHASE_LABELS,
+  checkpoint as checkpointWorkflow,
+  loadCheckpoint,
+  clearCheckpoint,
+  hasProgressBeyondInit,
   type WorkflowState,
 } from './workflow.js';
 
 function advance(state: WorkflowState, to: WorkflowPhase): WorkflowState {
   const from = state.phase;
   const next = transition(state, to);
+  const withCheckpoint = checkpointWorkflow(next, from);
   uiStream.push({
     type: 'phase_transition',
     from,
@@ -39,7 +44,7 @@ function advance(state: WorkflowState, to: WorkflowPhase): WorkflowState {
     total: WORKFLOW_TOTAL,
     label: PHASE_LABELS[to],
   });
-  return next;
+  return withCheckpoint;
 }
 
 // ── Complexity heuristic ──────────────────────────────────────────────────────
@@ -85,6 +90,22 @@ export async function runOrchestrator(
 
   // 10-phase workflow (light: emits phase_transition events, does not enforce control flow).
   let workflow = createWorkflowState(sessionId);
+  const priorCheckpoint = loadCheckpoint(sessionId);
+  if (priorCheckpoint && hasProgressBeyondInit(priorCheckpoint)) {
+    workflow = priorCheckpoint;
+    const summary = `Resuming session ${sessionId.slice(0, 8)} from ${formatPhase(priorCheckpoint.phase)} (checkpoints: ${priorCheckpoint.checkpoints
+      .map((p) => PHASE_LABELS[p])
+      .join(', ')})`;
+    uiStream.push({ type: 'session_resumed', sessionId, plan: {
+      goal: summary,
+      context: '',
+      filesToModify: [],
+      filesToCreate: [],
+      steps: [],
+      verificationCriteria: [],
+      risks: [],
+    } });
+  }
   uiStream.push({
     type: 'phase_transition',
     from: null,
@@ -160,6 +181,7 @@ export async function runOrchestrator(
     }
 
     workflow = advance(workflow, WorkflowPhase.COMPLETE);
+    clearCheckpoint(sessionId);
     uiStream.ensureDone('All steps completed successfully.');
     return;
   }
@@ -192,6 +214,7 @@ export async function runOrchestrator(
 
     if (response.answer === 'n') {
       workflow = advance(workflow, WorkflowPhase.COMPLETE);
+      clearCheckpoint(sessionId);
       uiStream.push({ type: 'done', summary: 'Plan rejected by user.' });
       return;
     }
@@ -291,6 +314,7 @@ export async function runOrchestrator(
   // If verification failed, skip memory and PR — session is incomplete.
 
   workflow = advance(workflow, WorkflowPhase.COMPLETE);
+  clearCheckpoint(sessionId);
   uiStream.ensureDone('All steps completed.');
 }
 

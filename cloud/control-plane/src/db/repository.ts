@@ -63,6 +63,14 @@ export interface Repository {
   updateSessionPrUrl(id: string, prUrl: string): Promise<Session>;
   updateSessionPrState(id: string, prState: PrState): Promise<Session>;
   findSessionByPrUrl(prUrl: string): Promise<Session | null>;
+  checkpointSession(
+    id: string,
+    fields: { phase: string; state: unknown },
+  ): Promise<Session>;
+  getSessionCheckpoint(
+    id: string,
+  ): Promise<{ phase: string; state: unknown } | null>;
+  clearSessionCheckpoint(id: string): Promise<Session>;
   completeSession(
     id: string,
     fields: { completedAt: Date; durationSeconds: number },
@@ -203,6 +211,8 @@ export function createPgRepository(
           vmPort: sessions.vmPort,
           prUrl: sessions.prUrl,
           prState: sessions.prState,
+          checkpointPhase: sessions.checkpointPhase,
+          checkpointState: sessions.checkpointState,
           startedAt: sessions.startedAt,
           completedAt: sessions.completedAt,
           durationSeconds: sessions.durationSeconds,
@@ -231,6 +241,8 @@ export function createPgRepository(
           vmPort: sessions.vmPort,
           prUrl: sessions.prUrl,
           prState: sessions.prState,
+          checkpointPhase: sessions.checkpointPhase,
+          checkpointState: sessions.checkpointState,
           startedAt: sessions.startedAt,
           completedAt: sessions.completedAt,
           durationSeconds: sessions.durationSeconds,
@@ -324,6 +336,43 @@ export function createPgRepository(
         .where(eq(sessions.prUrl, prUrl))
         .limit(1);
       return rows[0] ?? null;
+    },
+
+    async checkpointSession(id, fields) {
+      const [row] = await db
+        .update(sessions)
+        .set({
+          checkpointPhase: fields.phase,
+          checkpointState: fields.state as Session['checkpointState'],
+        })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
+    },
+
+    async getSessionCheckpoint(id) {
+      const rows = await db
+        .select({
+          phase: sessions.checkpointPhase,
+          state: sessions.checkpointState,
+        })
+        .from(sessions)
+        .where(eq(sessions.id, id))
+        .limit(1);
+      const row = rows[0];
+      if (!row || !row.phase) return null;
+      return { phase: row.phase, state: row.state };
+    },
+
+    async clearSessionCheckpoint(id) {
+      const [row] = await db
+        .update(sessions)
+        .set({ checkpointPhase: null, checkpointState: null })
+        .where(eq(sessions.id, id))
+        .returning();
+      if (!row) throw new Error('session not found');
+      return row;
     },
 
     async completeSession(id, fields) {

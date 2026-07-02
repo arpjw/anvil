@@ -85,6 +85,22 @@ export async function processEvent(
     logger.warn({ sessionId, eventType: event.type, err }, 'failed to persist event');
   }
 
+  // Session-level checkpoint: mirror phase_transition into sessions.checkpoint_*
+  // so a failed session can be resumed from the last-completed phase.
+  if (event.type === 'phase_transition' && normalizedPayload && typeof normalizedPayload === 'object') {
+    const phaseTo = (normalizedPayload as { to?: unknown }).to;
+    if (typeof phaseTo === 'string') {
+      try {
+        await repo.checkpointSession(sessionId, {
+          phase: phaseTo,
+          state: normalizedPayload,
+        });
+      } catch (err) {
+        logger.warn({ sessionId, err }, 'failed to persist workflow checkpoint');
+      }
+    }
+  }
+
   await publishToChannel(redis, sessionId, {
     type: event.type,
     payload: normalizedPayload,

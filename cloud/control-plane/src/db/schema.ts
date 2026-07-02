@@ -51,6 +51,8 @@ export const sessions = pgTable('sessions', {
   vmPort: integer('vm_port'),
   prUrl: text('pr_url'),
   prState: text('pr_state'),
+  checkpointPhase: text('checkpoint_phase'),
+  checkpointState: jsonb('checkpoint_state'),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   durationSeconds: integer('duration_seconds'),

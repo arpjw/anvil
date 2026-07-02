@@ -7,7 +7,7 @@ const TRANSITIONS: Record<SessionStatus, ReadonlySet<SessionStatus>> = {
   running: new Set<SessionStatus>(['reviewing', 'complete', 'failed', 'aborted']),
   reviewing: new Set<SessionStatus>(['running', 'failed', 'aborted']),
   complete: new Set<SessionStatus>(['complete']),
-  failed: new Set<SessionStatus>(['failed']),
+  failed: new Set<SessionStatus>(['failed', 'provisioning']),
   aborted: new Set<SessionStatus>(['aborted']),
 };
 

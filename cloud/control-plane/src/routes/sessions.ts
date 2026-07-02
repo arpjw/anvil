@@ -223,6 +223,56 @@ export function sessionsRoutes(): Hono<AppEnv> {
     return c.json({ session: updated });
   });
 
+  r.get('/:id/checkpoint', async (c) => {
+    const user = c.get('user');
+    const deps = c.get('deps');
+    const id = c.req.param('id');
+    const session = await deps.repo.findSessionById(id);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'session not found');
+    }
+    const checkpoint = await deps.repo.getSessionCheckpoint(id);
+    if (!checkpoint) {
+      throw new HttpError(404, 'no_checkpoint', 'no checkpoint for this session');
+    }
+    return c.json({ checkpoint });
+  });
+
+  r.post('/:id/resume', async (c) => {
+    const user = c.get('user');
+    const deps = c.get('deps');
+    const id = c.req.param('id');
+    const session = await deps.repo.findSessionById(id);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'session not found');
+    }
+    if (session.status !== 'failed') {
+      throw new HttpError(
+        400,
+        'invalid_state',
+        `session must be in failed state to resume (was ${session.status})`,
+      );
+    }
+    const checkpoint = await deps.repo.getSessionCheckpoint(id);
+    if (!checkpoint) {
+      throw new HttpError(400, 'no_checkpoint', 'session has no checkpoint to resume from');
+    }
+
+    const repo = await deps.repo.findRepoById(session.repoId);
+    if (!repo) {
+      throw new HttpError(404, 'repo_gone', 'session repo no longer exists');
+    }
+
+    const resumed = await deps.repo.updateSessionStatus(id, 'provisioning');
+
+    const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
+    if (apiKey && trackProvision(user.id, id)) {
+      void backgroundProvision(deps, resumed, repo, user, apiKey);
+    }
+
+    return c.json({ session: resumed, resumedFromPhase: checkpoint.phase });
+  });
+
   r.post('/:id/reject', async (c) => {
     const user = c.get('user');
     const deps = c.get('deps');

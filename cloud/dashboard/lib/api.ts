@@ -175,6 +175,35 @@ export async function openPullRequest(
   return request<OpenPrResult>('POST', `/sessions/${sessionId}/pr`);
 }
 
+export interface SessionCheckpoint {
+  phase: string;
+  state: unknown;
+}
+
+export async function getSessionCheckpoint(
+  sessionId: string,
+): Promise<SessionCheckpoint | null> {
+  try {
+    const data = await request<{ checkpoint: SessionCheckpoint }>(
+      'GET',
+      `/sessions/${sessionId}/checkpoint`,
+    );
+    return data.checkpoint;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function resumeSession(
+  sessionId: string,
+): Promise<{ session: Session; resumedFromPhase: string }> {
+  return request<{ session: Session; resumedFromPhase: string }>(
+    'POST',
+    `/sessions/${sessionId}/resume`,
+  );
+}
+
 export interface UsageResponse {
   period: { start: string; end: string | null };
   minutes: number;

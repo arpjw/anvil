@@ -6,8 +6,11 @@ import {
   abortSession,
   approveSession,
   getSession,
+  getSessionCheckpoint,
   openPullRequest,
   rejectSession,
+  resumeSession,
+  type SessionCheckpoint,
 } from '@/lib/api';
 import { useSessionEvents } from '@/lib/sse';
 import { ActivityEvent } from '@/components/ActivityEvent';
@@ -24,7 +27,7 @@ import type {
 } from '@/lib/types';
 
 export function SessionDetailView({ sessionId }: { sessionId: string }) {
-  const { data: initial, error } = useSWR<SessionDetail>(
+  const { data: initial, error, mutate: refetchSession } = useSWR<SessionDetail>(
     `/sessions/${sessionId}`,
     () => getSession(sessionId),
   );
@@ -33,6 +36,11 @@ export function SessionDetailView({ sessionId }: { sessionId: string }) {
   const session = initialSession ?? initial ?? null;
   const status: SessionStatus =
     liveStatus ?? session?.status ?? 'queued';
+
+  const { data: checkpoint } = useSWR<SessionCheckpoint | null>(
+    status === 'failed' ? `/sessions/${sessionId}/checkpoint` : null,
+    () => getSessionCheckpoint(sessionId),
+  );
 
   if (error) {
     return (
@@ -51,7 +59,14 @@ export function SessionDetailView({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="fixed inset-x-0 top-[52px] bottom-[40px] flex">
-      <LeftPanel session={session} status={status} events={events} />
+      <LeftPanel
+        session={session}
+        status={status}
+        events={events}
+        checkpoint={checkpoint ?? null}
+        sessionId={sessionId}
+        onResumed={() => refetchSession()}
+      />
       <RightPanel
         sessionId={sessionId}
         status={status}
@@ -111,12 +126,33 @@ function LeftPanel({
   session,
   status,
   events,
+  checkpoint,
+  sessionId,
+  onResumed,
 }: {
   session: SessionDetail;
   status: SessionStatus;
   events: UIEvent[];
+  checkpoint: SessionCheckpoint | null;
+  sessionId: string;
+  onResumed: () => void;
 }) {
   const elapsed = useLiveElapsed(session.startedAt, session.durationSeconds);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+
+  async function onResume() {
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await resumeSession(sessionId);
+      onResumed();
+    } catch (err) {
+      setResumeError((err as Error).message);
+    } finally {
+      setResuming(false);
+    }
+  }
 
   const filesModified = useMemo(() => {
     const seen = new Set<string>();
@@ -184,6 +220,27 @@ function LeftPanel({
         )}
         {status === 'running' && (
           <StatusHint color="#60a5fa">Agent is working…</StatusHint>
+        )}
+        {status === 'failed' && checkpoint && (
+          <div className="mt-3">
+            <div className="text-xs mb-2" style={{ color: '#6b7280' }}>
+              Checkpointed at{' '}
+              <span style={{ color: '#fbbf24' }}>{checkpoint.phase}</span>
+            </div>
+            <button
+              onClick={onResume}
+              disabled={resuming}
+              className="w-full text-xs px-3 py-1.5 rounded font-medium disabled:opacity-40"
+              style={{ backgroundColor: '#fbbf24', color: '#0a0a0a' }}
+            >
+              {resuming ? 'Resuming…' : `Resume from ${checkpoint.phase}`}
+            </button>
+            {resumeError && (
+              <p className="text-xs mt-2" style={{ color: '#f87171' }}>
+                {resumeError}
+              </p>
+            )}
+          </div>
         )}
       </Section>
 
