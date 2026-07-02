@@ -68,6 +68,12 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
     async listUserRepos() {
       return [];
     },
+    async getRepoTree() {
+      return [];
+    },
+    async getFileContent() {
+      return null;
+    },
   });
   const redis = new FakeRedis();
   const broadcaster = new SSEBroadcaster(redis);

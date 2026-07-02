@@ -1,7 +1,16 @@
-import { readFileSync, statSync } from 'fs';
-import { extname, relative } from 'path';
+import { createHash } from 'crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
+import { dirname, extname, join, relative, resolve } from 'path';
 import { listFilesWalk } from './walker.js';
 import { parseFile, queryNodes, type AstNode } from '../../treesitter/index.js';
+
+const EMBEDDING_STORAGE_BASE = '/tmp/anvil/embeddings';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -38,6 +47,36 @@ interface SessionIndex {
   chunks: EmbeddedChunk[];
   vocabulary?: Map<string, number>; // token → idf, only used in TF-IDF mode
   mode: 'voyage' | 'tfidf';
+  fileMtimes: Record<string, number>; // relative filepath → mtime ms
+  repoId?: string;
+}
+
+export interface EnsureIndexedOptions {
+  ignorePatterns?: string[];
+  repoId?: string;
+}
+
+interface PersistedIndex {
+  version: string;
+  mode: 'voyage' | 'tfidf';
+  chunks: SerialisedChunk[];
+  fileMtimes: Record<string, number>;
+  vocabulary?: Array<[string, number]>;
+  indexedAt: string;
+}
+
+interface SerialisedChunk {
+  filepath: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  vector: number[] | Array<[string, number]>; // dense or sparse
+  sparse: boolean;
+}
+
+export interface LoadResult {
+  hit: boolean;
+  staleFiles: string[];
 }
 
 // ── Service ──────────────────────────────────────────────────────────────────
@@ -82,19 +121,33 @@ export class EmbeddingService {
   }
 
   // Idempotent: only walks + indexes the first time it's called for a session.
-  // Returns a promise that resolves when indexing is done.
-  ensureIndexed(sessionId: string, workdir: string, opts?: { ignorePatterns?: string[] }): Promise<void> {
+  // If repoId is provided, first tries to load a persisted index and only
+  // re-indexes files whose mtime has changed since the last write.
+  ensureIndexed(
+    sessionId: string,
+    workdir: string,
+    opts?: EnsureIndexedOptions,
+  ): Promise<void> {
     const existing = this.indexingPromises.get(sessionId);
     if (existing) return existing;
     if (this.sessions.has(sessionId)) return Promise.resolve();
-    const promise = this.doIndexWorkdir(sessionId, workdir, opts?.ignorePatterns);
+    const promise = this.doIndexWorkdir(sessionId, workdir, opts);
     this.indexingPromises.set(sessionId, promise);
     return promise;
   }
 
-  async index(sessionId: string, chunks: Chunk[]): Promise<{ indexed: number }> {
+  async index(
+    sessionId: string,
+    chunks: Chunk[],
+    opts?: { fileMtimes?: Record<string, number>; repoId?: string },
+  ): Promise<{ indexed: number }> {
     if (chunks.length === 0) {
-      this.sessions.set(sessionId, { chunks: [], mode: this.mode });
+      this.sessions.set(sessionId, {
+        chunks: [],
+        mode: this.mode,
+        fileMtimes: opts?.fileMtimes ?? {},
+        repoId: opts?.repoId,
+      });
       return { indexed: 0 };
     }
     const embedded = await this.embedChunks(chunks);
@@ -102,6 +155,8 @@ export class EmbeddingService {
       chunks: embedded.chunks,
       vocabulary: embedded.vocabulary,
       mode: this.mode,
+      fileMtimes: opts?.fileMtimes ?? {},
+      repoId: opts?.repoId,
     };
     this.sessions.set(sessionId, session);
     return { indexed: chunks.length };
@@ -171,32 +226,174 @@ export class EmbeddingService {
   private async doIndexWorkdir(
     sessionId: string,
     workdir: string,
-    ignorePatterns?: string[],
+    opts?: EnsureIndexedOptions,
   ): Promise<void> {
     try {
-      const files = listFilesWalk(workdir, ignorePatterns);
-      const chunks: Chunk[] = [];
-      for (const abs of files) {
-        try {
-          const size = statSync(abs).size;
-          if (size > 250_000) continue; // skip huge files
-          const parsed = parseFile(abs);
-          if (parsed) {
-            const structural = chunkByAst(abs, parsed.content, workdir);
-            chunks.push(...structural);
-          } else if (isProbablyText(abs)) {
-            const content = readFileSync(abs, 'utf-8');
-            chunks.push(...chunkByLines(abs, content, workdir));
+      const repoId = opts?.repoId;
+
+      // Cache-first: try to load a persisted index and only re-embed changed files.
+      if (repoId) {
+        const loaded = await this.loadPersistedIndex(repoId, sessionId, workdir);
+        if (loaded.hit) {
+          if (loaded.staleFiles.length > 0) {
+            await this.incrementalUpdate(repoId, sessionId, workdir, loaded.staleFiles);
           }
-          if (chunks.length > 4000) break; // hard cap per session
-        } catch {
-          // skip unreadable
+          return;
         }
       }
-      await this.index(sessionId, chunks);
+
+      const { chunks, mtimes } = collectChunks(workdir, opts?.ignorePatterns);
+      await this.index(sessionId, chunks, { fileMtimes: mtimes, repoId });
+      if (repoId) await this.persistIndex(repoId, sessionId);
     } finally {
       this.indexingPromises.delete(sessionId);
     }
+  }
+
+  // ── Persistence ─────────────────────────────────────────────────────────
+
+  async persistIndex(repoId: string, sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    const path = persistPath(repoId);
+    mkdirSync(dirname(path), { recursive: true });
+
+    const chunks: SerialisedChunk[] = session.chunks.map((c) => {
+      const isSparse = c.vector instanceof Map;
+      const vector = isSparse
+        ? Array.from((c.vector as SparseVector).entries())
+        : (c.vector as number[]);
+      return {
+        filepath: c.filepath,
+        startLine: c.startLine,
+        endLine: c.endLine,
+        text: c.text,
+        vector,
+        sparse: isSparse,
+      };
+    });
+
+    const persisted: PersistedIndex = {
+      version: computeIndexVersion(session.fileMtimes),
+      mode: session.mode,
+      chunks,
+      fileMtimes: session.fileMtimes,
+      vocabulary: session.vocabulary
+        ? Array.from(session.vocabulary.entries())
+        : undefined,
+      indexedAt: new Date().toISOString(),
+    };
+
+    writeFileSync(path, JSON.stringify(persisted), 'utf-8');
+  }
+
+  async loadPersistedIndex(
+    repoId: string,
+    sessionId: string,
+    workdir: string,
+  ): Promise<LoadResult> {
+    const path = persistPath(repoId);
+    if (!existsSync(path)) return { hit: false, staleFiles: [] };
+
+    let parsed: PersistedIndex;
+    try {
+      parsed = JSON.parse(readFileSync(path, 'utf-8')) as PersistedIndex;
+    } catch {
+      return { hit: false, staleFiles: [] };
+    }
+
+    // If the persisted index is in a different embedding mode than the current
+    // service, treat as miss — vectors are incompatible.
+    if (parsed.mode !== this.mode) return { hit: false, staleFiles: [] };
+
+    const chunks: EmbeddedChunk[] = parsed.chunks.map((c) => ({
+      text: c.text,
+      filepath: c.filepath,
+      startLine: c.startLine,
+      endLine: c.endLine,
+      vector: c.sparse
+        ? (new Map(c.vector as Array<[string, number]>) as SparseVector)
+        : (c.vector as number[]),
+    }));
+
+    const vocabulary = parsed.vocabulary
+      ? new Map<string, number>(parsed.vocabulary)
+      : undefined;
+
+    this.sessions.set(sessionId, {
+      chunks,
+      vocabulary,
+      mode: parsed.mode,
+      fileMtimes: parsed.fileMtimes,
+      repoId,
+    });
+
+    // Check which persisted files are now stale.
+    const staleFiles: string[] = [];
+    for (const [relPath, mtime] of Object.entries(parsed.fileMtimes)) {
+      const abs = resolve(workdir, relPath);
+      let current: number;
+      try {
+        current = statSync(abs).mtimeMs;
+      } catch {
+        // File removed since indexing — mark stale so we drop its chunks.
+        staleFiles.push(relPath);
+        continue;
+      }
+      if (Math.floor(current) !== Math.floor(mtime)) staleFiles.push(relPath);
+    }
+
+    return { hit: true, staleFiles };
+  }
+
+  async incrementalUpdate(
+    repoId: string,
+    sessionId: string,
+    workdir: string,
+    changedFiles: string[],
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    const stale = new Set(changedFiles);
+    // Drop existing chunks for stale files.
+    session.chunks = session.chunks.filter((c) => !stale.has(c.filepath));
+
+    // Re-collect chunks for the changed files.
+    const newChunks: Chunk[] = [];
+    const updatedMtimes: Record<string, number> = { ...session.fileMtimes };
+    for (const rel of changedFiles) {
+      const abs = resolve(workdir, rel);
+      try {
+        const s = statSync(abs);
+        if (!s.isFile()) {
+          delete updatedMtimes[rel];
+          continue;
+        }
+        if (s.size > 250_000) continue;
+        const parsed = parseFile(abs);
+        if (parsed) {
+          newChunks.push(...chunkByAst(abs, parsed.content, workdir));
+        } else if (isProbablyText(abs)) {
+          const content = readFileSync(abs, 'utf-8');
+          newChunks.push(...chunkByLines(abs, content, workdir));
+        }
+        updatedMtimes[rel] = s.mtimeMs;
+      } catch {
+        delete updatedMtimes[rel];
+      }
+    }
+
+    if (newChunks.length > 0) {
+      const embedded = await this.embedChunks(newChunks);
+      session.chunks.push(...embedded.chunks);
+      // TF-IDF mode: vocabulary would drift as chunks change. For MVP, keep the
+      // vocabulary from the initial full index — new chunks still get scored
+      // against it. Voyage vectors are self-contained per chunk.
+    }
+
+    session.fileMtimes = updatedMtimes;
+    await this.persistIndex(repoId, sessionId);
   }
 
   private async embedChunks(chunks: Chunk[]): Promise<{
@@ -254,6 +451,52 @@ export class EmbeddingService {
     }
     return vec;
   }
+}
+
+// ── Persistence helpers ──────────────────────────────────────────────────────
+
+function persistPath(repoId: string): string {
+  return join(EMBEDDING_STORAGE_BASE, repoId, 'index.json');
+}
+
+export function persistedIndexPath(repoId: string): string {
+  return persistPath(repoId);
+}
+
+function computeIndexVersion(mtimes: Record<string, number>): string {
+  const keys = Object.keys(mtimes).sort();
+  const parts = keys.map((k) => `${k}:${Math.floor(mtimes[k] ?? 0)}`);
+  return createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16);
+}
+
+function collectChunks(
+  workdir: string,
+  ignorePatterns?: string[],
+): { chunks: Chunk[]; mtimes: Record<string, number> } {
+  const files = listFilesWalk(workdir, ignorePatterns);
+  const chunks: Chunk[] = [];
+  const mtimes: Record<string, number> = {};
+  for (const abs of files) {
+    try {
+      const s = statSync(abs);
+      if (s.size > 250_000) continue;
+      const rel = relative(workdir, abs) || abs;
+      const parsed = parseFile(abs);
+      if (parsed) {
+        chunks.push(...chunkByAst(abs, parsed.content, workdir));
+      } else if (isProbablyText(abs)) {
+        const content = readFileSync(abs, 'utf-8');
+        chunks.push(...chunkByLines(abs, content, workdir));
+      } else {
+        continue;
+      }
+      mtimes[rel] = s.mtimeMs;
+      if (chunks.length > 4000) break;
+    } catch {
+      // skip unreadable
+    }
+  }
+  return { chunks, mtimes };
 }
 
 // ── Chunking ─────────────────────────────────────────────────────────────────

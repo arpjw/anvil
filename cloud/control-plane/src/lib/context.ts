@@ -52,6 +52,17 @@ export type GithubClient = {
     repo: string,
     args: { title: string; body: string; head: string; base: string },
   ) => Promise<{ url: string; number: number }>;
+  getRepoTree: (
+    owner: string,
+    repo: string,
+    ref: string,
+  ) => Promise<Array<{ path: string; type: 'blob' | 'tree' | 'commit'; size?: number }>>;
+  getFileContent: (
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ) => Promise<string | null>;
 };
 
 export type GithubClientFactory = (

@@ -87,6 +87,23 @@ export const diffs = pgTable('diffs', {
     .defaultNow(),
 });
 
+export const repoEmbeddings = pgTable('repo_embeddings', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  repoId: uuid('repo_id')
+    .notNull()
+    .references(() => repos.id, { onDelete: 'cascade' })
+    .unique(),
+  indexVersion: text('index_version').notNull(),
+  chunkCount: integer('chunk_count').notNull(),
+  status: text('status').notNull().default('pending'),
+  errorMessage: text('error_message'),
+  storagePath: text('storage_path'),
+  indexedAt: timestamp('indexed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const waitlistSignups = pgTable('waitlist_signups', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   email: text('email').notNull().unique(),
@@ -115,6 +132,8 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type NewUsageRecord = typeof usageRecords.$inferInsert;
+export type RepoEmbedding = typeof repoEmbeddings.$inferSelect;
+export type NewRepoEmbedding = typeof repoEmbeddings.$inferInsert;
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
 export const PLAN_TIERS = ['free', 'pro', 'team'] as const;

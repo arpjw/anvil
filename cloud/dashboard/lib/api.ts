@@ -114,6 +114,18 @@ export async function listGithubRepos(): Promise<GithubRepoSummary[]> {
   return data.repos;
 }
 
+export interface RepoIndexStatus {
+  indexed: boolean;
+  status: 'not_started' | 'pending' | 'indexing' | 'ready' | 'failed';
+  chunkCount?: number;
+  indexedAt?: string | null;
+  errorMessage?: string | null;
+}
+
+export async function getRepoIndexStatus(id: string): Promise<RepoIndexStatus> {
+  return request<RepoIndexStatus>('GET', `/repos/${id}/index-status`);
+}
+
 export async function getRepoBranches(id: string): Promise<string[]> {
   const data = await request<{ branches: Array<{ name: string }> | string[] }>(
     'GET',

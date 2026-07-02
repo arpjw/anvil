@@ -5,9 +5,11 @@ import useSWR, { useSWRConfig } from 'swr';
 import {
   connectRepo,
   deleteRepo,
+  getRepoIndexStatus,
   getRepos,
   listGithubRepos,
   type GithubRepoSummary,
+  type RepoIndexStatus,
 } from '@/lib/api';
 import type { Repo } from '@/lib/types';
 
@@ -135,7 +137,7 @@ export function ReposSettings() {
                   border: '1px solid #1f1f1f',
                 }}
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="font-mono text-sm" style={{ color: '#f0f0f0' }}>
                     {r.fullName}
                   </div>
@@ -143,9 +145,10 @@ export function ReposSettings() {
                     default: {r.defaultBranch}
                   </div>
                 </div>
+                <IndexStatusBadge repoId={r.id} />
                 <button
                   onClick={() => onRemove(r)}
-                  className="text-xs px-2.5 py-1 rounded"
+                  className="ml-3 text-xs px-2.5 py-1 rounded"
                   style={{
                     color: '#f87171',
                     border: '1px solid rgba(248, 113, 113, 0.3)',
@@ -159,6 +162,49 @@ export function ReposSettings() {
         )}
       </section>
     </div>
+  );
+}
+
+function IndexStatusBadge({ repoId }: { repoId: string }) {
+  const { data } = useSWR<RepoIndexStatus>(
+    `/repos/${repoId}/index-status`,
+    () => getRepoIndexStatus(repoId),
+    { refreshInterval: (d) => (d?.status === 'indexing' || d?.status === 'pending' ? 5_000 : 0) },
+  );
+  if (!data) return null;
+
+  if (data.status === 'ready') {
+    return (
+      <span className="text-xs font-mono" style={{ color: '#4ade80' }}>
+        Indexed {data.chunkCount ?? 0} chunks
+      </span>
+    );
+  }
+  if (data.status === 'indexing' || data.status === 'pending') {
+    return (
+      <span
+        className="text-xs font-mono flex items-center gap-2"
+        style={{ color: '#fbbf24' }}
+      >
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full animate-pulse"
+          style={{ backgroundColor: '#fbbf24' }}
+        />
+        Indexing…
+      </span>
+    );
+  }
+  if (data.status === 'failed') {
+    return (
+      <span className="text-xs font-mono" style={{ color: '#f87171' }}>
+        Index failed
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs font-mono" style={{ color: '#6b7280' }}>
+      Not indexed
+    </span>
   );
 }
 

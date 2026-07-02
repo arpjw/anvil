@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { rateLimit } from '../middleware/rate-limit';
 import { HttpError } from '../lib/errors';
+import { triggerRepoIndexing } from '../github/index-repo';
 import type { AppEnv } from '../lib/context';
 
 const fullNameRe = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -47,7 +48,38 @@ export function reposRoutes(): Hono<AppEnv> {
       fullName,
       defaultBranch: defaultBranch ?? ghRepo.defaultBranch ?? 'main',
     });
+
+    // Fire-and-forget: pre-index the repo so semantic_search is warm when
+    // the user starts their first session.
+    void triggerRepoIndexing(deps, {
+      repoId: created.id,
+      fullName: created.fullName,
+      branch: created.defaultBranch,
+      githubToken: user.githubAccessToken,
+    });
+
     return c.json({ repo: created }, 201);
+  });
+
+  r.get('/:id/index-status', async (c) => {
+    const user = c.get('user');
+    const deps = c.get('deps');
+    const id = c.req.param('id');
+    const existing = await deps.repo.findRepoById(id);
+    if (!existing || existing.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'repo not found');
+    }
+    const embedding = await deps.repo.getRepoEmbedding(id);
+    if (!embedding) {
+      return c.json({ indexed: false, status: 'not_started' });
+    }
+    return c.json({
+      indexed: embedding.status === 'ready',
+      status: embedding.status,
+      chunkCount: embedding.chunkCount,
+      indexedAt: embedding.indexedAt?.toISOString() ?? null,
+      errorMessage: embedding.errorMessage,
+    });
   });
 
   r.delete('/:id', async (c) => {

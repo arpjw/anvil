@@ -16,6 +16,7 @@ import type {
   PlanTier,
   PrState,
   Repo,
+  RepoEmbedding,
   Session,
   SessionStatus,
   UsageRecord,
@@ -42,6 +43,7 @@ export function createMemoryRepository(): Repository & {
   const eventsById = new Map<string, Event>();
   const diffsById = new Map<string, Diff>();
   const usageById = new Map<string, UsageRecord>();
+  const embeddingsByRepo = new Map<string, RepoEmbedding>();
   const waitlistSignups = new Map<
     string,
     { id: string; email: string; source: string | null; createdAt: Date }
@@ -361,6 +363,27 @@ export function createMemoryRepository(): Repository & {
       return out.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     },
 
+    async getRepoEmbedding(repoId) {
+      return embeddingsByRepo.get(repoId) ?? null;
+    },
+
+    async upsertRepoEmbedding(repoId, data) {
+      const existing = embeddingsByRepo.get(repoId);
+      const rec: RepoEmbedding = {
+        id: existing?.id ?? uuid(),
+        repoId,
+        indexVersion: data.indexVersion,
+        chunkCount: data.chunkCount,
+        status: data.status,
+        errorMessage: data.errorMessage ?? null,
+        storagePath: data.storagePath ?? null,
+        indexedAt: data.indexedAt ?? null,
+        createdAt: existing?.createdAt ?? new Date(),
+      };
+      embeddingsByRepo.set(repoId, rec);
+      return rec;
+    },
+
     async addWaitlistSignup(email, source) {
       for (const s of waitlistSignups.values()) {
         if (s.email === email) return false;
@@ -516,6 +539,8 @@ export type StubbedGithub = {
   prCalls: StubbedPrCall[];
   prResponses: Map<string, { url: string; number: number }>;
   userRepos: Array<{ fullName: string; defaultBranch: string; private: boolean }>;
+  trees: Map<string, Array<{ path: string; type: 'blob' | 'tree' | 'commit'; size?: number }>>;
+  contents: Map<string, string>;
   lastToken: string | null | undefined;
 };
 
@@ -588,6 +613,12 @@ export function createGithubStub(stub: StubbedGithub) {
       },
       async listUserRepos() {
         return stub.userRepos;
+      },
+      async getRepoTree(owner, repo) {
+        return stub.trees.get(`${owner}/${repo}`) ?? [];
+      },
+      async getFileContent(owner, repo, path) {
+        return stub.contents.get(`${owner}/${repo}:${path}`) ?? null;
       },
     };
   };
@@ -675,6 +706,8 @@ export function createHarness(): Harness {
     prCalls: [],
     prResponses: new Map(),
     userRepos: [],
+    trees: new Map(),
+    contents: new Map(),
     lastToken: undefined,
   };
   const redis = new FakeRedis();

@@ -124,6 +124,39 @@ export const octokitGithubClient: GithubClientFactory = (accessToken) => {
         throwNotAccessible(err);
       }
     },
+    async getRepoTree(owner, repo, ref) {
+      try {
+        const { data } = await client.git.getTree({
+          owner,
+          repo,
+          tree_sha: ref,
+          recursive: 'true',
+        });
+        return (data.tree ?? [])
+          .filter((e) => e.type === 'blob' || e.type === 'tree' || e.type === 'commit')
+          .map((e) => ({
+            path: e.path ?? '',
+            type: (e.type ?? 'blob') as 'blob' | 'tree' | 'commit',
+            size: e.size,
+          }));
+      } catch (err) {
+        throwNotAccessible(err);
+      }
+    },
+    async getFileContent(owner, repo, path, ref) {
+      try {
+        const { data } = await client.repos.getContent({ owner, repo, path, ref });
+        if (Array.isArray(data)) return null;
+        if ('content' in data && typeof data.content === 'string') {
+          return Buffer.from(data.content, data.encoding as BufferEncoding).toString('utf8');
+        }
+        return null;
+      } catch (err) {
+        const status = statusOf(err);
+        if (status === 404) return null;
+        throwNotAccessible(err);
+      }
+    },
     async createPullRequest(owner, repo, args) {
       try {
         const { data } = await client.pulls.create({

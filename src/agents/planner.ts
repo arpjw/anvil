@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
@@ -27,6 +28,10 @@ export interface PlannerAnvilCtx {
 }
 
 const SHADOW_BASE = '/tmp/anvil';
+
+function repoIdFromWorkdir(workdir: string): string {
+  return createHash('sha1').update(workdir).digest('hex').slice(0, 16);
+}
 
 const WRITE_PLAN_TOOL: OpenAI.Chat.ChatCompletionTool = {
   type: 'function',
@@ -171,12 +176,17 @@ export async function runPlanner(
   // Kick off embedding indexing in the background so semantic_search is fast
   // by the time the planner reaches for it. Non-blocking on purpose.
   await embeddingService.start();
-  embeddingService.ensureIndexed(sessionId, workdir, { ignorePatterns }).catch(err => {
-    uiStream.push({
-      type: 'error',
-      message: `[embedding] indexing failed: ${(err as Error).message}`,
+  // Persist across sessions per repo. In the CLI we use the workdir as the
+  // repo identity; the cloud VM runtime can pass ANVIL_REPO_ID.
+  const repoId = process.env.ANVIL_REPO_ID ?? repoIdFromWorkdir(workdir);
+  embeddingService
+    .ensureIndexed(sessionId, workdir, { ignorePatterns, repoId })
+    .catch((err) => {
+      uiStream.push({
+        type: 'error',
+        message: `[embedding] indexing failed: ${(err as Error).message}`,
+      });
     });
-  });
 
   await runStreamingLoop(effectiveClient, effectiveModelId, messages, plannerTools, async (name, args) => {
     if (name === 'write_plan') {

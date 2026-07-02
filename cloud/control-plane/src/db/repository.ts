@@ -3,6 +3,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   diffs,
   events,
+  repoEmbeddings,
   repos,
   sessions,
   usageRecords,
@@ -15,6 +16,7 @@ import {
   type PlanTier,
   type PrState,
   type Repo,
+  type RepoEmbedding,
   type Session,
   type SessionStatus,
   type UsageRecord,
@@ -98,6 +100,19 @@ export interface Repository {
 
   addWaitlistSignup(email: string, source: string | null): Promise<boolean>;
   countWaitlistSignups(): Promise<number>;
+
+  getRepoEmbedding(repoId: string): Promise<RepoEmbedding | null>;
+  upsertRepoEmbedding(
+    repoId: string,
+    data: {
+      indexVersion: string;
+      chunkCount: number;
+      status: 'pending' | 'indexing' | 'ready' | 'failed';
+      errorMessage?: string | null;
+      storagePath?: string | null;
+      indexedAt?: Date | null;
+    },
+  ): Promise<RepoEmbedding>;
 
   listDiffsBySession(sessionId: string): Promise<Diff[]>;
   findDiffById(id: string): Promise<Diff | null>;
@@ -479,6 +494,53 @@ export function createPgRepository(
           ),
         )
         .orderBy(desc(usageRecords.createdAt));
+    },
+
+    async getRepoEmbedding(repoId) {
+      const rows = await db
+        .select()
+        .from(repoEmbeddings)
+        .where(eq(repoEmbeddings.repoId, repoId))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    async upsertRepoEmbedding(repoId, data) {
+      const existing = await db
+        .select()
+        .from(repoEmbeddings)
+        .where(eq(repoEmbeddings.repoId, repoId))
+        .limit(1);
+      if (existing[0]) {
+        const [row] = await db
+          .update(repoEmbeddings)
+          .set({
+            indexVersion: data.indexVersion,
+            chunkCount: data.chunkCount,
+            status: data.status,
+            errorMessage: data.errorMessage ?? null,
+            storagePath: data.storagePath ?? null,
+            indexedAt: data.indexedAt ?? null,
+          })
+          .where(eq(repoEmbeddings.repoId, repoId))
+          .returning();
+        if (!row) throw new Error('failed to update repo embedding');
+        return row;
+      }
+      const [row] = await db
+        .insert(repoEmbeddings)
+        .values({
+          repoId,
+          indexVersion: data.indexVersion,
+          chunkCount: data.chunkCount,
+          status: data.status,
+          errorMessage: data.errorMessage ?? null,
+          storagePath: data.storagePath ?? null,
+          indexedAt: data.indexedAt ?? null,
+        })
+        .returning();
+      if (!row) throw new Error('failed to create repo embedding');
+      return row;
     },
 
     async addWaitlistSignup(email, source) {
