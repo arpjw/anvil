@@ -2,6 +2,7 @@ import { createApp } from '../app';
 import { pino } from 'pino';
 import type { AppDeps, GithubClient, VerifyTokenFn } from '../lib/context';
 import { SSEBroadcaster } from '../events/broadcaster';
+import { makeMemoryStore } from '../middleware/rate-limit';
 import type {
   Repository,
   SessionDetail,
@@ -41,6 +42,10 @@ export function createMemoryRepository(): Repository & {
   const eventsById = new Map<string, Event>();
   const diffsById = new Map<string, Diff>();
   const usageById = new Map<string, UsageRecord>();
+  const waitlistSignups = new Map<
+    string,
+    { id: string; email: string; source: string | null; createdAt: Date }
+  >();
 
   return {
     _users: usersById,
@@ -326,6 +331,24 @@ export function createMemoryRepository(): Repository & {
         if (r.userId === userId && r.createdAt >= since) out.push(r);
       }
       return out.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
+
+    async addWaitlistSignup(email, source) {
+      for (const s of waitlistSignups.values()) {
+        if (s.email === email) return false;
+      }
+      const rec = {
+        id: uuid(),
+        email,
+        source,
+        createdAt: new Date(),
+      };
+      waitlistSignups.set(rec.id, rec);
+      return true;
+    },
+
+    async countWaitlistSignups() {
+      return waitlistSignups.size;
     },
 
     async listDiffsBySession(sessionId) {
@@ -629,6 +652,7 @@ export function createHarness(): Harness {
       cancelUrl: 'https://app.local/billing/cancel',
       portalReturnUrl: 'https://app.local/settings/billing',
     },
+    rateLimit: makeMemoryStore(),
     redis,
     broadcaster,
   };

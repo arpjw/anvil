@@ -203,5 +203,20 @@ export async function openBillingPortal(): Promise<{ url: string }> {
   return request<{ url: string }>('POST', '/billing/portal');
 }
 
+export async function joinWaitlist(
+  email: string,
+  source?: string,
+): Promise<{ added: boolean; alreadyOnList: boolean }> {
+  return request<{ added: boolean; alreadyOnList: boolean }>(
+    'POST',
+    '/waitlist',
+    { email, ...(source ? { source } : {}) },
+  );
+}
+
 export type { Diff, Repo, Session, SessionDetail } from './types';
 export type { UIEvent } from './types';
+
+export function isRateLimitError(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === 429;
+}

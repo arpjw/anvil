@@ -84,6 +84,11 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
       cancelUrl: '',
       portalReturnUrl: '',
     },
+    rateLimit: {
+      async incrWithExpire() {
+        return 1;
+      },
+    },
     redis,
     broadcaster,
   };

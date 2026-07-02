@@ -3,6 +3,51 @@
 > One entry per Claude Code session. Write it before closing the session.
 > The next session starts by reading the most recent entry here + current phase in BUILDPLAN.md.
 
+## Session C8 — July 2, 2026
+**Phase:** C8 — Polish + Launch
+**Duration:** ~1h
+
+### What was accomplished
+- Rate limiting: RateLimitStore interface + Redis + in-memory implementations
+  (middleware/rate-limit.ts). rateLimit() middleware pulls store from deps at request
+  time. Wired into POST /sessions (20/hour/user) and POST /repos (30/hour/user).
+- Waitlist: waitlist_signups table (migration 0003), POST /api/v1/waitlist (public,
+  30/hour/IP, idempotent by email), GET /waitlist/count. Landing WaitlistForm on the
+  signed-out homepage.
+- Onboarding: SessionList surfaces a 3-step "Get started" card when a signed-in user
+  has zero repos + zero sessions.
+- Error surfaces: app/error.tsx global boundary shows a friendly retry screen with the
+  Next digest for support. isRateLimitError helper exported from lib/api.
+- Abuse prevention: existing MAX_CONCURRENT_PER_USER=3 in sessions.ts kept; per-user
+  rate limit on session_create effectively caps burst attack surface at 20/hour.
+- Documentation: cloud/README.md (local dev + env vars + deploy sketch) and
+  cloud/docs/api.md (endpoint-by-endpoint reference).
+- Tests: 4 new tests (waitlist happy path / idempotent / bad email / count endpoint)
+  + rate-limit integration test (20 pass, 21st gets 429).
+
+### Decisions made
+- Waitlist rate-limit keyed by IP (x-forwarded-for / x-real-ip) since callers are
+  unauthenticated.
+- rateLimit middleware pulls the store from context rather than closing over it —
+  makes the middleware factory reusable across routers and cleanly testable with the
+  memory store.
+
+### Checks
+- control-plane: bunx tsc clean, bun test 89/89 (was 80, +9: 4 waitlist + 1 rate-limit
+  + 4 other billing coverage adjustments).
+- dashboard: tsc clean, next build clean.
+
+### State of codebase at close
+- All C1–C8 cloud phases done. Full flow: waitlist → sign in → onboard → connect repo
+  → session → plan approval → diff review → PR (auto or manual) → webhook merge state
+  → Stripe usage report → billing UI reflects minutes.
+
+### Next session should start with
+- Phase 11: Distribution — bun compile, npm publish, auto LSP install, anvilai init /
+  doctor / config, custom slash commands, GitHub Actions integration.
+
+---
+
 ## Session C7 — July 2, 2026
 **Phase:** C7 — Billing
 **Duration:** ~1h

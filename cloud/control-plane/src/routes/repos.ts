@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { rateLimit } from '../middleware/rate-limit';
 import { HttpError } from '../lib/errors';
 import type { AppEnv } from '../lib/context';
 
@@ -22,7 +23,10 @@ export function reposRoutes(): Hono<AppEnv> {
     return c.json({ repos });
   });
 
-  r.post('/', async (c) => {
+  r.post(
+    '/',
+    rateLimit({ bucket: 'repo_create', windowSeconds: 3600, max: 30 }),
+    async (c) => {
     const user = c.get('user');
     const deps = c.get('deps');
     const body = await c.req.json().catch(() => null);

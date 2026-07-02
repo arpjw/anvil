@@ -2,6 +2,7 @@ import type { User } from '../db/schema';
 import type { Repository } from '../db/repository';
 import type { RedisPublisher } from '../events/pipeline';
 import type { SSEBroadcaster } from '../events/broadcaster';
+import type { RateLimitStore } from '../middleware/rate-limit';
 
 export type VerifyTokenFn = (token: string) => Promise<{ clerkId: string }>;
 
@@ -89,6 +90,7 @@ export type AppDeps = {
   githubClient: GithubClientFactory;
   stripe: StripeClient | null;
   billing: BillingConfig;
+  rateLimit: RateLimitStore;
   redis: RedisPublisher;
   broadcaster: SSEBroadcaster;
 };

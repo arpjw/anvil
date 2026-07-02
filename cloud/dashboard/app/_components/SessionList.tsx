@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import useSWR from 'swr';
-import { getSessions } from '@/lib/api';
+import { getRepos, getSessions } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
-import type { Session } from '@/lib/types';
+import type { Repo, Session } from '@/lib/types';
 
 function timeAgo(iso: string | null): string {
   if (!iso) return '';
@@ -40,12 +40,79 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n) + '…';
 }
 
+function Onboarding() {
+  return (
+    <div
+      className="rounded-md p-6 mb-4"
+      style={{ backgroundColor: '#111111', border: '1px solid #1f1f1f' }}
+    >
+      <p
+        className="text-[11px] uppercase font-mono tracking-wider mb-3"
+        style={{ color: '#fbbf24' }}
+      >
+        Get started
+      </p>
+      <h2 className="text-lg font-medium mb-2">Welcome to Anvil</h2>
+      <p className="text-sm mb-5" style={{ color: '#6b7280' }}>
+        Three quick steps and you&apos;ll have your first PR:
+      </p>
+      <ol className="space-y-3 mb-5 text-sm">
+        <OnboardingStep n={1}>
+          <Link href="/settings/repos" className="underline" style={{ color: '#fbbf24' }}>
+            Connect a GitHub repo
+          </Link>{' '}
+          — pick one from the import list.
+        </OnboardingStep>
+        <OnboardingStep n={2}>
+          <Link href="/sessions/new" className="underline" style={{ color: '#fbbf24' }}>
+            Start a session
+          </Link>{' '}
+          — describe what you want changed.
+        </OnboardingStep>
+        <OnboardingStep n={3}>
+          Approve the plan, review the diff, and Anvil opens a PR.
+        </OnboardingStep>
+      </ol>
+      <p className="text-xs" style={{ color: '#6b7280' }}>
+        First 60 minutes / month are free.{' '}
+        <Link href="/settings/billing" className="underline" style={{ color: '#6b7280' }}>
+          See plans
+        </Link>
+        .
+      </p>
+    </div>
+  );
+}
+
+function OnboardingStep({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-3">
+      <span
+        className="shrink-0 mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono"
+        style={{
+          backgroundColor: '#0d0d0d',
+          border: '1px solid #1f1f1f',
+          color: '#fbbf24',
+        }}
+      >
+        {n}
+      </span>
+      <span style={{ color: '#f0f0f0' }}>{children}</span>
+    </li>
+  );
+}
+
 export function SessionList() {
   const { data: sessions, error, isLoading } = useSWR<Session[]>(
     '/sessions',
     getSessions,
     { refreshInterval: 10_000 },
   );
+  const { data: repos } = useSWR<Repo[]>('/repos', getRepos);
+  const needsOnboarding =
+    repos !== undefined &&
+    repos.length === 0 &&
+    (sessions?.length ?? 0) === 0;
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -62,6 +129,8 @@ export function SessionList() {
           New session
         </Link>
       </div>
+
+      {needsOnboarding && <Onboarding />}
 
       {error && (
         <div
@@ -82,7 +151,7 @@ export function SessionList() {
         </div>
       )}
 
-      {sessions && sessions.length === 0 && (
+      {sessions && sessions.length === 0 && !needsOnboarding && (
         <div
           className="rounded-md p-10 text-center"
           style={{
@@ -104,7 +173,7 @@ export function SessionList() {
       )}
 
       {sessions && sessions.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="space-y-2 mt-6">
           {sessions.map((s) => (
             <li key={s.id}>
               <Link

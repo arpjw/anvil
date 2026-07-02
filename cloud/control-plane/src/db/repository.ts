@@ -7,6 +7,7 @@ import {
   sessions,
   usageRecords,
   users,
+  waitlistSignups,
   type Diff,
   type DiffStatus,
   type Event,
@@ -86,6 +87,9 @@ export interface Repository {
   markUsageReported(id: string): Promise<UsageRecord>;
   listUnreportedUsage(userId: string): Promise<UsageRecord[]>;
   listUsageBySince(userId: string, since: Date): Promise<UsageRecord[]>;
+
+  addWaitlistSignup(email: string, source: string | null): Promise<boolean>;
+  countWaitlistSignups(): Promise<number>;
 
   listDiffsBySession(sessionId: string): Promise<Diff[]>;
   findDiffById(id: string): Promise<Diff | null>;
@@ -420,6 +424,24 @@ export function createPgRepository(
           ),
         )
         .orderBy(desc(usageRecords.createdAt));
+    },
+
+    async addWaitlistSignup(email, source) {
+      try {
+        await db.insert(waitlistSignups).values({ email, source });
+        return true;
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === '23505') return false;
+        throw err;
+      }
+    },
+
+    async countWaitlistSignups() {
+      const rows = await db
+        .select({ id: waitlistSignups.id })
+        .from(waitlistSignups);
+      return rows.length;
     },
 
     async listDiffsBySession(sessionId) {

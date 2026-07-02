@@ -9,6 +9,7 @@ import { octokitGithubClient } from './lib/github';
 import { createStripeClient } from './lib/stripe';
 import { logger } from './lib/logger';
 import { createBroadcaster } from './events/broadcaster';
+import { makeRedisStore } from './middleware/rate-limit';
 import type { StripeClient } from './lib/context';
 
 async function main() {
@@ -71,6 +72,7 @@ async function main() {
           process.env.STRIPE_PORTAL_RETURN_URL ??
           `${dashboardOrigin}/settings/billing`,
       },
+      rateLimit: makeRedisStore(redis),
       redis,
       broadcaster,
     },

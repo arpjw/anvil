@@ -11,6 +11,7 @@ import { diffsRoutes } from './routes/diffs';
 import { prRoutes } from './routes/pr';
 import { githubRoutes, githubWebhookRoutes } from './routes/github';
 import { billingRoutes, stripeWebhookRoutes } from './routes/billing';
+import { waitlistRoutes } from './routes/waitlist';
 import { requireAuth } from './middleware/auth';
 import { sseHandler } from './events/sse';
 
@@ -79,6 +80,7 @@ export function createApp(opts: CreateAppOptions): Hono<AppEnv> {
     },
   );
 
+  app.route('/api/v1/waitlist', waitlistRoutes());
   app.route('/api/v1/auth', authRoutes());
   app.route('/api/v1/repos', reposRoutes());
   app.route('/api/v1/sessions', sessionsRoutes());

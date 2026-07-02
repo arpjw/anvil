@@ -85,6 +85,15 @@ export const diffs = pgTable('diffs', {
     .defaultNow(),
 });
 
+export const waitlistSignups = pgTable('waitlist_signups', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  email: text('email').notNull().unique(),
+  source: text('source'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const usageRecords = pgTable('usage_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id')
@@ -104,6 +113,8 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type NewUsageRecord = typeof usageRecords.$inferInsert;
+export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
+export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
 export const PLAN_TIERS = ['free', 'pro', 'team'] as const;
 export type PlanTier = (typeof PLAN_TIERS)[number];
 export type Repo = typeof repos.$inferSelect;

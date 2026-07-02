@@ -258,13 +258,13 @@
 
 ---
 
-## Phase C8 — Polish + Launch
+## Phase C8 — Polish + Launch ✓
 **Goal:** Waitlist page, onboarding flow, error handling, rate limiting, abuse prevention, documentation.
 
-- [ ] Waitlist landing page
-- [ ] Onboarding flow (connect GitHub, pick first repo, run sample session)
-- [ ] End-to-end error handling and user-facing error states
-- [ ] Rate limiting on session create and API endpoints
-- [ ] Abuse prevention (VM resource caps, suspicious-pattern detection)
-- [ ] Documentation (user guide, API reference, deployment runbook)
+- [x] Waitlist landing page
+- [x] Onboarding flow (connect GitHub, pick first repo, run sample session)
+- [x] End-to-end error handling and user-facing error states
+- [x] Rate limiting on session create and API endpoints
+- [x] Abuse prevention (VM resource caps, suspicious-pattern detection)
+- [x] Documentation (user guide, API reference, deployment runbook)
 

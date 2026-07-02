@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { rateLimit } from '../middleware/rate-limit';
 import { HttpError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import type { AppDeps, AppEnv } from '../lib/context';
@@ -92,7 +93,14 @@ export function sessionsRoutes(): Hono<AppEnv> {
   const r = new Hono<AppEnv>();
   r.use('*', requireAuth());
 
-  r.post('/', async (c) => {
+  r.post(
+    '/',
+    rateLimit({
+      bucket: 'session_create',
+      windowSeconds: 3600,
+      max: 20,
+    }),
+    async (c) => {
     const user = c.get('user');
     const deps = c.get('deps');
     const body = await c.req.json().catch(() => null);
