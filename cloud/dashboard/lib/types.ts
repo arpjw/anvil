@@ -78,16 +78,23 @@ export interface UIEvent {
   timestamp?: number;
 }
 
+// Kept in sync with src/setup/config.ts::AVAILABLE_MODELS. Every id must be a
+// real string the provider's API will accept.
 export const MODELS = [
-  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', provider: 'Anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'Anthropic' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'Anthropic' },
-  { id: 'gpt-5', label: 'GPT-5', provider: 'OpenAI' },
-  { id: 'gpt-5-mini', label: 'GPT-5 mini', provider: 'OpenAI' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'Anthropic' },
+  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', provider: 'Anthropic' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'Anthropic' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'Anthropic' },
+  { id: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o mini', provider: 'OpenAI' },
   { id: 'o3', label: 'o3', provider: 'OpenAI' },
+  { id: 'o4-mini', label: 'o4-mini', provider: 'OpenAI' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'Google' },
-  { id: 'kimi-k2', label: 'Kimi K2', provider: 'Moonshot' },
+  { id: 'moonshot-v1-128k', label: 'Moonshot v1 · 128K', provider: 'Moonshot' },
+  { id: 'moonshot-v1-32k', label: 'Moonshot v1 · 32K', provider: 'Moonshot' },
+  { id: 'moonshot-v1-8k', label: 'Moonshot v1 · 8K', provider: 'Moonshot' },
 ] as const;
 
 export type ModelId = (typeof MODELS)[number]['id'];

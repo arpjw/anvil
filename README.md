@@ -64,10 +64,10 @@ anvilai doctor
 **Set your API key.** Anvil supports Claude, GPT, Gemini, and Moonshot. On first run, an interactive picker lets you select a model — it will tell you which environment variable to set.
 
 ```bash
-export ANTHROPIC_API_KEY=...   # Claude Sonnet 4.6 (default) or Opus 4.8
-export OPENAI_API_KEY=...      # GPT-5.5, GPT-5.5 Pro, GPT-5.4
-export GEMINI_API_KEY=...      # Gemini 3.5 Flash, Gemini 3.1 Pro
-export MOONSHOT_API_KEY=...    # Kimi K2.6, Kimi K2.7 Code
+export ANTHROPIC_API_KEY=...   # Claude Sonnet 4.6 (default), Opus 4.8 / 4.7 / 4.6, Haiku 4.5
+export OPENAI_API_KEY=...      # GPT-4o, GPT-4o mini, o3, o4-mini
+export GEMINI_API_KEY=...      # Gemini 2.5 Pro, Gemini 2.5 Flash
+export MOONSHOT_API_KEY=...    # Moonshot v1 (8K / 32K / 128K context)
 ```
 
 ---

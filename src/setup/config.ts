@@ -16,7 +16,12 @@ export interface ModelSpec {
   baseURL: string | null;
 }
 
+// Every `id` here must be a real model string the provider's API will accept.
+// Marketing names ("Kimi K2", "GPT-5") belong in `label`, never in `id`.
+// When adding a model, verify against the provider's /models endpoint or the
+// official API reference — no aspirational IDs.
 export const AVAILABLE_MODELS: ModelSpec[] = [
+  // ── Anthropic ──────────────────────────────────────────────────────────────
   {
     id: 'claude-sonnet-4-6',
     label: 'Claude Sonnet 4.6',
@@ -34,59 +39,102 @@ export const AVAILABLE_MODELS: ModelSpec[] = [
     baseURL: null,
   },
   {
-    id: 'gpt-5.5',
-    label: 'GPT-5.5',
+    id: 'claude-opus-4-7',
+    label: 'Claude Opus 4.7',
+    provider: 'anthropic',
+    envKey: 'ANTHROPIC_API_KEY',
+    description: 'Prior Opus generation',
+    baseURL: null,
+  },
+  {
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    provider: 'anthropic',
+    envKey: 'ANTHROPIC_API_KEY',
+    description: 'Older Opus, still solid',
+    baseURL: null,
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    provider: 'anthropic',
+    envKey: 'ANTHROPIC_API_KEY',
+    description: 'Cheapest / fastest Claude',
+    baseURL: null,
+  },
+  // ── OpenAI ─────────────────────────────────────────────────────────────────
+  {
+    id: 'gpt-4o',
+    label: 'GPT-4o',
     provider: 'openai',
     envKey: 'OPENAI_API_KEY',
-    description: 'OpenAI flagship',
+    description: 'OpenAI flagship multimodal',
     baseURL: 'https://api.openai.com/v1',
   },
   {
-    id: 'gpt-5.5-pro',
-    label: 'GPT-5.5 Pro',
+    id: 'gpt-4o-mini',
+    label: 'GPT-4o mini',
     provider: 'openai',
     envKey: 'OPENAI_API_KEY',
-    description: 'OpenAI highest capability, more compute',
+    description: 'Cheap, fast, still strong',
     baseURL: 'https://api.openai.com/v1',
   },
   {
-    id: 'gpt-5.4',
-    label: 'GPT-5.4',
+    id: 'o3',
+    label: 'o3',
     provider: 'openai',
     envKey: 'OPENAI_API_KEY',
-    description: 'OpenAI previous gen, still strong',
+    description: 'Reasoning model — slower, better on hard tasks',
     baseURL: 'https://api.openai.com/v1',
   },
   {
-    id: 'gemini-3.5-flash',
-    label: 'Gemini 3.5 Flash',
+    id: 'o4-mini',
+    label: 'o4-mini',
+    provider: 'openai',
+    envKey: 'OPENAI_API_KEY',
+    description: 'Reasoning model, faster / cheaper than o3',
+    baseURL: 'https://api.openai.com/v1',
+  },
+  // ── Google ─────────────────────────────────────────────────────────────────
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro',
     provider: 'google',
     envKey: 'GEMINI_API_KEY',
-    description: 'Google — fast, cheap, strong on coding',
+    description: 'Google flagship — long context',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
   {
-    id: 'gemini-3.1-pro-preview',
-    label: 'Gemini 3.1 Pro Preview',
+    id: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
     provider: 'google',
     envKey: 'GEMINI_API_KEY',
-    description: 'Google flagship',
+    description: 'Cheap, fast Google model',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
+  // ── Moonshot ───────────────────────────────────────────────────────────────
   {
-    id: 'kimi-k2.6',
-    label: 'Kimi K2.6',
+    id: 'moonshot-v1-128k',
+    label: 'Moonshot v1 · 128K context',
     provider: 'moonshot',
     envKey: 'MOONSHOT_API_KEY',
-    description: 'Moonshot — economical, multimodal',
+    description: 'Kimi K2 backend — largest context window',
     baseURL: 'https://api.moonshot.cn/v1',
   },
   {
-    id: 'kimi-k2.7-code',
-    label: 'Kimi K2.7 Code',
+    id: 'moonshot-v1-32k',
+    label: 'Moonshot v1 · 32K context',
     provider: 'moonshot',
     envKey: 'MOONSHOT_API_KEY',
-    description: 'Moonshot — coding-optimized, 256K context',
+    description: 'Kimi K2 backend — mid context',
+    baseURL: 'https://api.moonshot.cn/v1',
+  },
+  {
+    id: 'moonshot-v1-8k',
+    label: 'Moonshot v1 · 8K context',
+    provider: 'moonshot',
+    envKey: 'MOONSHOT_API_KEY',
+    description: 'Kimi K2 backend — cheapest / smallest context',
     baseURL: 'https://api.moonshot.cn/v1',
   },
 ];
