@@ -204,6 +204,42 @@ export async function runOrchestrator(
   };
   uiStream.on('event', captureFilesModified);
 
+  // ── Open changed files in $EDITOR (Feature 5). detached + stdio:'ignore'
+  //    means the parent exits without waiting; ideal for GUI editors like
+  //    cursor/code/subl. Terminal editors (vim/nvim) won't render properly —
+  //    users can disable with --no-open or `anvilai config set autoOpen false`.
+  const maybeOpenEditor = async (): Promise<void> => {
+    if (noOpen || headless) return;
+    if (!loadConfig().autoOpen) return;
+    const editor = process.env.EDITOR;
+    const files = Array.from(filesModifiedSet);
+    if (files.length === 0) return;
+    if (!editor) {
+      uiStream.push({
+        type: 'error',
+        message: 'Tip: set EDITOR=cursor (or code, subl) to auto-open changed files.',
+      });
+      return;
+    }
+    try {
+      const { execa } = await import('execa');
+      const parts = editor.split(/\s+/).filter(Boolean);
+      const [cmd, ...editorArgs] = parts;
+      if (!cmd) return;
+      execa(cmd, [...editorArgs, ...files], {
+        cwd: workdir,
+        detached: true,
+        stdio: 'ignore',
+      }).catch(() => { /* editor may exit non-zero; not our problem */ });
+      uiStream.push({
+        type: 'error',
+        message: `Opening ${files.length} file${files.length === 1 ? '' : 's'} in ${cmd}`,
+      });
+    } catch {
+      /* execa spawn failure — non-fatal */
+    }
+  };
+
   // ── Persist the two conversation turns (user request + assistant summary) ──
   const persistConversationTurns = (): void => {
     try {
@@ -261,6 +297,7 @@ export async function runOrchestrator(
     workflow = advance(workflow, WorkflowPhase.COMPLETE);
     clearCheckpoint(sessionId);
     persistConversationTurns();
+    await maybeOpenEditor();
     uiStream.off('event', captureFilesModified);
     clearSessionUsage(sessionId);
     uiStream.ensureDone('All steps completed successfully.');
@@ -400,6 +437,7 @@ export async function runOrchestrator(
   workflow = advance(workflow, WorkflowPhase.COMPLETE);
   clearCheckpoint(sessionId);
   persistConversationTurns();
+  await maybeOpenEditor();
   uiStream.off('event', captureFilesModified);
   clearSessionUsage(sessionId);
   uiStream.ensureDone('All steps completed.');
