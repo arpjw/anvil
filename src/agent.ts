@@ -1,5 +1,9 @@
 import { runOrchestrator, type OrchestratorOptions } from './agents/orchestrator.js';
-import { BudgetExceededError } from './billing/usage.js';
+import {
+  BudgetExceededError,
+  clearSessionUsage,
+  persistSessionUsage,
+} from './billing/usage.js';
 import { uiStream } from './ui/stream.js';
 
 export async function runAgent(
@@ -16,6 +20,9 @@ export async function runAgent(
   } catch (err) {
     if (err instanceof BudgetExceededError) {
       // Clean exit — the budget_exceeded event was already emitted from the loop.
+      // Persist the final usage so `anvilai history` shows the aborted cost.
+      persistSessionUsage(workdir, sessionId);
+      clearSessionUsage(sessionId);
       uiStream.ensureDone(err.message);
       return;
     }

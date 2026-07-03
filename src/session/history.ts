@@ -104,6 +104,55 @@ function readWorkflowPhase(sessionId: string): string | null {
   }
 }
 
+interface PersistedUsageOnDisk {
+  sessionId?: string;
+  estimatedCostUSD?: number;
+  durationSeconds?: number;
+  completedAt?: string;
+}
+
+// Reads .anvil/sessions/<sessionId>.json (matched by full id or 8-char prefix).
+// Returns null if the file doesn't exist or is malformed.
+function readPersistedUsage(
+  workdir: string,
+  sessionIdOrShort: string,
+): { estimatedCost: number; durationSeconds: number; completedAt?: string } | null {
+  const dir = join(workdir, '.anvil', 'sessions');
+  if (!existsSync(dir)) return null;
+  const short = sessionIdOrShort.slice(0, 8);
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const match = entries.find(
+    (e) =>
+      (e.startsWith(sessionIdOrShort) || e.startsWith(short)) &&
+      e.endsWith('.json'),
+  );
+  if (!match) return null;
+
+  try {
+    const raw = readFileSync(join(dir, match), 'utf-8');
+    const parsed = JSON.parse(raw) as PersistedUsageOnDisk;
+    if (
+      parsed.estimatedCostUSD === undefined &&
+      parsed.durationSeconds === undefined
+    ) {
+      return null;
+    }
+    return {
+      estimatedCost: parsed.estimatedCostUSD ?? 0,
+      durationSeconds: parsed.durationSeconds ?? 0,
+      completedAt: parsed.completedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function findPrPath(sessionId: string): string | null {
   const dir = join(SHADOW_BASE, sessionId);
   if (!existsSync(dir)) return null;
@@ -185,15 +234,19 @@ export function listHistory(workdir: string): SessionRecord[] {
 
     const filesModified = Array.from(new Set(assistant?.filesModified ?? []));
 
+    // Prefer the full session UUID from turns (so persisted-usage lookup
+    // matches by full id), fall back to the 8-char key.
+    const fullId = turns[0]?.sessionId ?? sid;
+    const persisted = readPersistedUsage(workdir, fullId);
+
     records.push({
       sessionId: sid,
       date,
       request,
       filesModified,
       turnCount: turns.length,
-      // estimatedCost / durationSeconds: not persisted yet
-      estimatedCost: undefined,
-      durationSeconds: undefined,
+      estimatedCost: persisted?.estimatedCost,
+      durationSeconds: persisted?.durationSeconds,
       status: statusFromTurns(turns),
     });
   }
@@ -303,6 +356,8 @@ export function getSession(
     date = new Date();
   }
 
+  const persisted = readPersistedUsage(workdir, fullId);
+
   return {
     sessionId: fullId,
     date,
@@ -315,8 +370,8 @@ export function getSession(
     shadowEntries,
     workflowPhase,
     prPath,
-    estimatedCost: undefined,
-    durationSeconds: undefined,
+    estimatedCost: persisted?.estimatedCost,
+    durationSeconds: persisted?.durationSeconds,
     status: statusFromTurns(turns),
   };
 }
@@ -335,6 +390,17 @@ export function formatSessionDetail(detail: SessionDetail): string {
   lines.push(chalk.bold('Status'));
   lines.push(`  ${statusLabel(detail.status).trim()}` +
     (detail.workflowPhase ? chalk.dim(`  (checkpoint at ${detail.workflowPhase})`) : ''));
+  if (detail.estimatedCost !== undefined || detail.durationSeconds !== undefined) {
+    const parts: string[] = [];
+    if (detail.estimatedCost !== undefined) {
+      parts.push(`~$${detail.estimatedCost.toFixed(2)}`);
+    }
+    if (detail.durationSeconds !== undefined) {
+      const s = detail.durationSeconds;
+      parts.push(s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
+    }
+    lines.push(`  ${chalk.dim(parts.join('  ·  '))}`);
+  }
   lines.push('');
 
   if (detail.filesModified.length > 0) {

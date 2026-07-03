@@ -26,6 +26,7 @@ import {
   BudgetExceededError,
   clearSessionUsage,
   initSessionUsage,
+  persistSessionUsage,
 } from '../billing/usage.js';
 import {
   createWorkflowState,
@@ -299,6 +300,7 @@ export async function runOrchestrator(
     persistConversationTurns();
     await maybeOpenEditor();
     uiStream.off('event', captureFilesModified);
+    persistSessionUsage(workdir, sessionId);
     clearSessionUsage(sessionId);
     uiStream.ensureDone('All steps completed successfully.');
     return;
@@ -336,6 +338,8 @@ export async function runOrchestrator(
       doneSummary = doneSummary || 'Plan rejected by user.';
       persistConversationTurns();
       uiStream.off('event', captureFilesModified);
+      persistSessionUsage(workdir, sessionId);
+      clearSessionUsage(sessionId);
       uiStream.push({ type: 'done', summary: 'Plan rejected by user.' });
       return;
     }

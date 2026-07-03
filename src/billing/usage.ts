@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+
 // Cost estimation for a session. All prices are per 1M tokens.
 // Numbers as supplied by the user; some may not match live provider pricing
 // exactly — they're a running estimate, not billing truth.
@@ -139,10 +142,12 @@ export class BudgetExceededError extends Error {
 // orchestrator, and UI can all read the same running total without threading
 // it through every function.
 const sessionUsageStore = new Map<string, SessionUsage>();
+const sessionStartStore = new Map<string, Date>();
 
 export function initSessionUsage(sessionId: string, model: string): SessionUsage {
   const initial = emptyUsage(model);
   sessionUsageStore.set(sessionId, initial);
+  sessionStartStore.set(sessionId, new Date());
   return initial;
 }
 
@@ -163,4 +168,62 @@ export function addUsage(
 
 export function clearSessionUsage(sessionId: string): void {
   sessionUsageStore.delete(sessionId);
+  sessionStartStore.delete(sessionId);
+}
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+
+export interface PersistedSessionUsage {
+  sessionId: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  estimatedCostUSD: number;
+  durationSeconds: number;
+  completedAt: string; // ISO
+}
+
+// Serialises the current in-memory usage for a session to
+// <workdir>/.anvil/sessions/<sessionId>.json so the history subcommand can
+// surface real cost + duration numbers after the CLI process has exited.
+// Safe to call multiple times — later calls overwrite earlier ones.
+export function persistSessionUsage(
+  workdir: string,
+  sessionId: string,
+): PersistedSessionUsage | null {
+  const usage = sessionUsageStore.get(sessionId);
+  const startedAt = sessionStartStore.get(sessionId);
+  if (!usage || !startedAt) return null;
+
+  try {
+    const dir = join(workdir, '.anvil', 'sessions');
+    mkdirSync(dir, { recursive: true });
+
+    const record: PersistedSessionUsage = {
+      sessionId,
+      model: usage.model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      estimatedCostUSD: usage.estimatedCostUSD,
+      durationSeconds: Math.max(
+        0,
+        Math.round((Date.now() - startedAt.getTime()) / 1000),
+      ),
+      completedAt: new Date().toISOString(),
+    };
+    writeFileSync(
+      join(dir, `${sessionId}.json`),
+      JSON.stringify(record, null, 2),
+      'utf-8',
+    );
+    return record;
+  } catch {
+    // Non-fatal — persistence is best-effort. History display just falls
+    // back to "--" for that row's cost / duration.
+    return null;
+  }
 }
