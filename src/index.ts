@@ -79,6 +79,33 @@ async function main(): Promise<void> {
     process.exit(exitCode);
   }
 
+  // ── anvilai history [workdir]  |  anvilai history <sessionId> [workdir] ────
+  if (positional[0] === 'history') {
+    const { listHistory, formatHistory, getSession, formatSessionDetail, looksLikeSessionId } =
+      await import('./session/history.js');
+
+    if (positional[1] && looksLikeSessionId(positional[1])) {
+      const sessionId = positional[1];
+      const workdir = resolve(positional[2] ?? process.cwd());
+      const detail = getSession(workdir, sessionId);
+      if (!detail) {
+        console.error(`Session ${sessionId.slice(0, 8)} not found in ${workdir}`);
+        process.exit(1);
+      }
+      console.log(formatSessionDetail(detail));
+      return;
+    }
+
+    const workdir = resolve(positional[1] ?? process.cwd());
+    const records = listHistory(workdir);
+    if (records.length === 0) {
+      console.log(`No sessions found in ${workdir}`);
+      return;
+    }
+    console.log(formatHistory(records));
+    return;
+  }
+
   // ── anvilai memory summarize [workdir] ──────────────────────────────────────
   if (positional[0] === 'memory' && positional[1] === 'summarize') {
     const workdir = resolve(positional[2] ?? process.cwd());
@@ -147,7 +174,8 @@ async function main(): Promise<void> {
     positional[0] === 'doctor' ||
     positional[0] === 'config' ||
     positional[0] === 'undo' ||
-    positional[0] === 'memory';
+    positional[0] === 'memory' ||
+    positional[0] === 'history';
   if (
     !isHeadless &&
     !isDryRun &&
@@ -275,6 +303,10 @@ async function main(): Promise<void> {
     console.error('  anvil config list            Show all config values');
     console.error('  anvil config set <key> <v>   Set a config value');
     console.error('  anvil config get <key>       Get a config value');
+    console.error('  anvil history [workdir]      List past sessions in a workdir');
+    console.error('  anvil history <id> [workdir] Show full detail for one session');
+    console.error('  anvil undo <file> [workdir]  Revert one file from the latest session');
+    console.error('  anvil memory summarize [wd]  Collapse memory.md older entries');
     console.error('\nFlags:');
     console.error('  --model <id>             Select model (skips picker)');
     console.error('  --rollback <sessionId>   Revert all changes from a session');
