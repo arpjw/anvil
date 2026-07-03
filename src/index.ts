@@ -79,6 +79,20 @@ async function main(): Promise<void> {
     process.exit(exitCode);
   }
 
+  // ── anvilai memory summarize [workdir] ──────────────────────────────────────
+  if (positional[0] === 'memory' && positional[1] === 'summarize') {
+    const workdir = resolve(positional[2] ?? process.cwd());
+    const { summarizeMemory } = await import('./context/project.js');
+    try {
+      await summarizeMemory(workdir);
+      console.log(`✓ Summarised memory in ${workdir}/.anvil/memory.md`);
+    } catch (err) {
+      console.error(`✗ Summarisation failed: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   // ── anvilai undo <filepath> [workdir] ────────────────────────────────────────
   if (positional[0] === 'undo') {
     const filepath = positional[1];
