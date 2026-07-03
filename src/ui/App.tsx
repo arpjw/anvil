@@ -240,6 +240,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const [verification, setVerification] = useState<VerificationState | undefined>(undefined);
   const [workflow, setWorkflow] = useState<WorkflowIndicator | null>(null);
   const [priorTurns, setPriorTurns] = useState<number | null>(null);
+  const [costLabel, setCostLabel] = useState<string | null>(null);
 
   const handleDiffDone = useCallback((acceptedIndices: Set<number>) => {
     if (!diffState) return;
@@ -473,6 +474,26 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
           color: 'cyan',
         }]);
         break;
+
+      case 'usage_update': {
+        const u = event.usage;
+        const dollars = u.estimatedCostUSD < 0.01 ? '<$0.01' : `$${u.estimatedCostUSD.toFixed(2)}`;
+        setCostLabel(dollars);
+        break;
+      }
+
+      case 'budget_exceeded': {
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `✖ Budget cap reached: $${event.capUSD.toFixed(2)}`,
+          color: 'red',
+        }]);
+        break;
+      }
+
+      case 'command_output':
+        // handled below in dedicated command_output UI (Feature 3)
+        break;
     }
   }, []);
 
@@ -605,7 +626,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         </Box>
       )}
 
-      <StatusBar phase={phase} startTime={startTime} verification={verification} modelLabel={modelLabel} />
+      <StatusBar phase={phase} startTime={startTime} verification={verification} modelLabel={modelLabel} costLabel={costLabel} />
     </Box>
   );
 }

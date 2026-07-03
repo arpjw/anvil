@@ -294,6 +294,8 @@ export interface AnvilConfig {
   autoVerify: boolean;
   autoBranch: boolean;
   setupComplete: boolean;
+  budgetCapUSD: number | null;
+  autoOpen: boolean;
 }
 
 const DEFAULTS: AnvilConfig = {
@@ -306,6 +308,8 @@ const DEFAULTS: AnvilConfig = {
   autoVerify: true,
   autoBranch: true,
   setupComplete: false,
+  budgetCapUSD: null,
+  autoOpen: true,
 };
 
 const ANVIL_DIR = join(homedir(), '.anvil');
@@ -354,6 +358,8 @@ const TYPE_MAP: Record<ConfigKey, string> = {
   autoVerify: 'boolean',
   autoBranch: 'boolean',
   setupComplete: 'boolean',
+  budgetCapUSD: 'number|null',
+  autoOpen: 'boolean',
 };
 
 function parseValue(key: ConfigKey, raw: string): AnvilConfig[ConfigKey] {
@@ -370,6 +376,12 @@ function parseValue(key: ConfigKey, raw: string): AnvilConfig[ConfigKey] {
   }
   if (expected === 'string|null') {
     return raw === 'null' ? null : raw;
+  }
+  if (expected === 'number|null') {
+    if (raw === 'null') return null;
+    const n = Number(raw);
+    if (isNaN(n)) throw new Error(`Invalid number value "${raw}".`);
+    return n;
   }
   return raw;
 }

@@ -36,6 +36,7 @@ export async function runExecutor(
   extraContext?: string,
   client?: OpenAI,
   modelId?: string,
+  budgetCapUSD?: number | null,
 ): Promise<ExecutorReport> {
   const effectiveClient = client ?? new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -80,7 +81,11 @@ export async function runExecutor(
     }
 
     return { result };
-  }, 20, { suppressDoneEvent: !!extraContext });
+  }, 20, {
+    suppressDoneEvent: !!extraContext,
+    sessionId,
+    budgetCapUSD: budgetCapUSD ?? null,
+  });
 
   return { success: escalations.length === 0, escalations };
 }

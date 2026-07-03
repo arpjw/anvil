@@ -111,6 +111,7 @@ export async function runPlanner(
   anvilCtx?: PlannerAnvilCtx,
   client?: OpenAI,
   modelId?: string,
+  budgetCapUSD?: number | null,
 ): Promise<string> {
   const effectiveClient = client ?? new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -188,16 +189,24 @@ export async function runPlanner(
       });
     });
 
-  await runStreamingLoop(effectiveClient, effectiveModelId, messages, plannerTools, async (name, args) => {
-    if (name === 'write_plan') {
-      mkdirSync(planDir, { recursive: true });
-      writeFileSync(planPath, JSON.stringify(args, null, 2), 'utf-8');
-      planWritten = true;
-      return { result: `Plan written to ${planPath}`, done: true };
-    }
-    const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
-    return { result };
-  });
+  await runStreamingLoop(
+    effectiveClient,
+    effectiveModelId,
+    messages,
+    plannerTools,
+    async (name, args) => {
+      if (name === 'write_plan') {
+        mkdirSync(planDir, { recursive: true });
+        writeFileSync(planPath, JSON.stringify(args, null, 2), 'utf-8');
+        planWritten = true;
+        return { result: `Plan written to ${planPath}`, done: true };
+      }
+      const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
+      return { result };
+    },
+    20,
+    { sessionId, budgetCapUSD: budgetCapUSD ?? null },
+  );
 
   if (!planWritten) {
     throw new Error('[Planner] write_plan was never called — no plan was produced');

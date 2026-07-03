@@ -26,11 +26,13 @@ export function StatusBar({
   startTime,
   verification,
   modelLabel = 'claude-sonnet-4-6',
+  costLabel,
 }: {
   phase: Phase;
   startTime: number;
   verification?: VerificationState;
   modelLabel?: string;
+  costLabel?: string | null;
 }) {
   const [now, setNow] = useState(Date.now());
 
@@ -54,6 +56,7 @@ export function StatusBar({
   return (
     <Box borderStyle="single" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Text dimColor>{modelLabel}</Text>
+      {costLabel && <Text color="yellow">{costLabel}</Text>}
       <Text color={PHASE_COLORS[phase]} bold>{phase.toUpperCase()}</Text>
       {verLabel && verColor && (
         <Text color={verColor as never} bold>{verLabel}</Text>

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import type { Plan } from '../agents/planner.js';
 import type { FileDiff } from '../diff/engine.js';
 import type { WorkflowPhase } from '../agents/workflow.js';
+import type { SessionUsage } from '../billing/usage.js';
 
 export type Phase = 'idle' | 'planning' | 'executing' | 'done' | 'error';
 
@@ -50,6 +51,14 @@ export type UIEvent =
   | { type: 'interrupt_resolved'; action: 'continue' | 'stop' | 'rollback' }
   | { type: 'session_resumed'; sessionId: string; plan: Plan }
   | { type: 'conversation_loaded'; priorTurns: number; conversationId: string }
+  | { type: 'usage_update'; usage: SessionUsage }
+  | { type: 'budget_exceeded'; capUSD: number; usage: SessionUsage }
+  | {
+      type: 'command_output';
+      command: string;
+      line: string;
+      stream: 'stdout' | 'stderr';
+    }
   | {
       type: 'phase_transition';
       from: WorkflowPhase | null;

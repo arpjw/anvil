@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { uiStream } from '../ui/stream.js';
+import { addUsage, BudgetExceededError } from '../billing/usage.js';
 
 export type ToolExecutorFn = (
   name: string,
@@ -8,6 +9,34 @@ export type ToolExecutorFn = (
 
 export interface LoopOptions {
   suppressDoneEvent?: boolean;
+  sessionId?: string;
+  budgetCapUSD?: number | null;
+}
+
+interface UsagePayload {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+function extractUsage(raw: unknown): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+} | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const u = raw as UsagePayload;
+  const cacheRead =
+    u.cache_read_input_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
+  return {
+    inputTokens: Math.max(0, (u.prompt_tokens ?? 0) - cacheRead),
+    outputTokens: u.completion_tokens ?? 0,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+  };
 }
 
 export async function runStreamingLoop(
@@ -30,13 +59,19 @@ export async function runStreamingLoop(
       tools,
       tool_choice: 'auto',
       stream: true,
+      stream_options: { include_usage: true },
     });
 
     let textContent = '';
     const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {};
     let finishReason: string | null = null;
+    let usageChunk: unknown = null;
 
     for await (const chunk of stream) {
+      // Usage arrives on a trailing chunk after all deltas.
+      if ((chunk as { usage?: unknown }).usage) {
+        usageChunk = (chunk as { usage: unknown }).usage;
+      }
       const choice = chunk.choices[0];
       if (!choice) continue;
 
@@ -52,6 +87,27 @@ export async function runStreamingLoop(
           if (tc.id) toolCallMap[idx].id = tc.id;
           if (tc.function?.name) toolCallMap[idx].name = tc.function.name;
           if (tc.function?.arguments) toolCallMap[idx].arguments += tc.function.arguments;
+        }
+      }
+    }
+
+    // Accumulate + emit usage after every API turn; enforce budget if set.
+    if (usageChunk && options.sessionId) {
+      const delta = extractUsage(usageChunk);
+      if (delta) {
+        const updated = addUsage(options.sessionId, delta);
+        if (updated) {
+          uiStream.push({ type: 'usage_update', usage: updated });
+          if (options.budgetCapUSD !== null && options.budgetCapUSD !== undefined) {
+            if (updated.estimatedCostUSD > options.budgetCapUSD) {
+              uiStream.push({
+                type: 'budget_exceeded',
+                capUSD: options.budgetCapUSD,
+                usage: updated,
+              });
+              throw new BudgetExceededError(options.budgetCapUSD, updated);
+            }
+          }
         }
       }
     }

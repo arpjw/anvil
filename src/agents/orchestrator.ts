@@ -23,6 +23,11 @@ import {
   turnCount,
 } from '../session/conversation.js';
 import {
+  BudgetExceededError,
+  clearSessionUsage,
+  initSessionUsage,
+} from '../billing/usage.js';
+import {
   createWorkflowState,
   transition,
   formatPhase,
@@ -96,7 +101,12 @@ export async function runOrchestrator(
     client,
     modelId,
     continueConversation = false,
+    budgetCapUSD: budgetCapFromOpts,
+    noOpen = false,
   } = options;
+
+  const effectiveBudgetCap =
+    budgetCapFromOpts !== undefined ? budgetCapFromOpts : loadConfig().budgetCapUSD;
 
   // Resolve effective client and model — fall back to config if not provided by caller.
   const effectiveModelId = modelId ?? loadConfig().model;
@@ -104,6 +114,11 @@ export async function runOrchestrator(
   const effectiveApiKey = process.env[effectiveSpec.envKey] ?? process.env.ANTHROPIC_API_KEY ?? '';
   const effectiveBaseURL = effectiveSpec.baseURL ?? 'https://api.anthropic.com/v1';
   const effectiveClient = client ?? new OpenAI({ apiKey: effectiveApiKey, baseURL: effectiveBaseURL });
+
+  // Initialise per-session usage tracking. The loop reads and updates this
+  // through addUsage(); the TUI subscribes to usage_update events.
+  const initialUsage = initSessionUsage(sessionId, effectiveModelId);
+  uiStream.push({ type: 'usage_update', usage: initialUsage });
 
   // 10-phase workflow (light: emits phase_transition events, does not enforce control flow).
   let workflow = createWorkflowState(sessionId);
@@ -226,7 +241,7 @@ export async function runOrchestrator(
     uiStream.on('event', captureDone);
     workflow = advance(workflow, WorkflowPhase.EXECUTING);
     uiStream.push({ type: 'phase', phase: 'executing' });
-    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
+    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId, effectiveBudgetCap);
     uiStream.off('event', captureDone);
 
     reportEscalations(report.escalations);
@@ -247,6 +262,7 @@ export async function runOrchestrator(
     clearCheckpoint(sessionId);
     persistConversationTurns();
     uiStream.off('event', captureFilesModified);
+    clearSessionUsage(sessionId);
     uiStream.ensureDone('All steps completed successfully.');
     return;
   }
@@ -265,7 +281,7 @@ export async function runOrchestrator(
         memory: ctx.memory,
         ignorePatterns,
         image,
-      }, effectiveClient, effectiveModelId),
+      }, effectiveClient, effectiveModelId, effectiveBudgetCap),
     ]);
 
     workflow = advance(workflow, WorkflowPhase.PLANNING);
@@ -347,7 +363,7 @@ export async function runOrchestrator(
 
   workflow = advance(workflow, WorkflowPhase.EXECUTING);
   uiStream.push({ type: 'phase', phase: 'executing' });
-  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId);
+  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId, effectiveBudgetCap);
 
   // Drain the commit queue before post-session steps.
   await commitQueue;
@@ -385,6 +401,7 @@ export async function runOrchestrator(
   clearCheckpoint(sessionId);
   persistConversationTurns();
   uiStream.off('event', captureFilesModified);
+  clearSessionUsage(sessionId);
   uiStream.ensureDone('All steps completed.');
 }
 
