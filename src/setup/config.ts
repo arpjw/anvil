@@ -112,6 +112,23 @@ export const AVAILABLE_MODELS: ModelSpec[] = [
     description: 'Cheap, fast Google model',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
+  // ── Z.ai / GLM ─────────────────────────────────────────────────────────────
+  {
+    id: 'glm-4-plus',
+    label: 'GLM-4 Plus',
+    provider: 'zai',
+    envKey: 'GLM_API_KEY',
+    description: 'Z.ai flagship — strongest GLM available via API',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+  },
+  {
+    id: 'glm-4-flash',
+    label: 'GLM-4 Flash',
+    provider: 'zai',
+    envKey: 'GLM_API_KEY',
+    description: 'Z.ai — fast, cheap, free tier available',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+  },
   // ── Moonshot ───────────────────────────────────────────────────────────────
   {
     id: 'moonshot-v1-128k',

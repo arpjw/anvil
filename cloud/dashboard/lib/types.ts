@@ -92,6 +92,8 @@ export const MODELS = [
   { id: 'o4-mini', label: 'o4-mini', provider: 'OpenAI' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'Google' },
+  { id: 'glm-4-plus', label: 'GLM-4 Plus', provider: 'Z.ai' },
+  { id: 'glm-4-flash', label: 'GLM-4 Flash', provider: 'Z.ai' },
   { id: 'moonshot-v1-128k', label: 'Moonshot v1 · 128K', provider: 'Moonshot' },
   { id: 'moonshot-v1-32k', label: 'Moonshot v1 · 32K', provider: 'Moonshot' },
   { id: 'moonshot-v1-8k', label: 'Moonshot v1 · 8K', provider: 'Moonshot' },
