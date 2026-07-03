@@ -17,6 +17,16 @@ const isRollback    = argv[0] === '--rollback';
 const isResume      = argv[0] === '--resume';
 const showCommands  = argv.includes('--commands');
 const showVersion   = argv.includes('--version') || argv[0] === '-V';
+const continueConv  = argv.includes('--continue');
+const noOpen        = argv.includes('--no-open');
+
+// Extract --budget <dollars>
+let budgetCapUSD: number | null = null;
+const budgetIdx = argv.indexOf('--budget');
+if (budgetIdx !== -1 && argv[budgetIdx + 1] && !argv[budgetIdx + 1].startsWith('--')) {
+  const parsed = Number(argv[budgetIdx + 1]);
+  if (Number.isFinite(parsed) && parsed > 0) budgetCapUSD = parsed;
+}
 
 // Extract --image <filepath>
 let imagePath: string | null = null;
@@ -37,6 +47,7 @@ const positional = argv.filter((a, i) => {
   if (a.startsWith('--')) return false;
   if (i > 0 && argv[i - 1] === '--image') return false;
   if (i > 0 && argv[i - 1] === '--model') return false;
+  if (i > 0 && argv[i - 1] === '--budget') return false;
   return true;
 });
 
@@ -211,6 +222,9 @@ async function main(): Promise<void> {
     console.error('  --dry-run                Plan only — print plan, do not execute');
     console.error('  --no-verify              Skip post-execution verification pass');
     console.error('  --commands               List available slash commands');
+    console.error('  --continue               Continue the prior conversation in this workdir');
+    console.error('  --budget <dollars>       Abort the session if estimated cost exceeds this');
+    console.error('  --no-open                Do not spawn $EDITOR after the session completes');
     console.error('  --version                Print the installed anvil-agent version');
     console.error('\nEnv: API key for the selected model must be set');
     process.exit(1);
@@ -366,6 +380,9 @@ async function main(): Promise<void> {
       client,
       modelId,
       modelLabel,
+      continueConversation: continueConv,
+      budgetCapUSD,
+      noOpen,
     });
     uiStream.ensureDone();
     await new Promise(r => setTimeout(r, 500));

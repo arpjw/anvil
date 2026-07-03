@@ -17,6 +17,12 @@ import { registerInterruptHandler } from '../execution/interrupt.js';
 import type { ImageContentBlock } from '../context/image.js';
 import { AVAILABLE_MODELS, loadConfig } from '../setup/config.js';
 import {
+  appendTurn,
+  loadConversation,
+  summarizeHistory,
+  turnCount,
+} from '../session/conversation.js';
+import {
   createWorkflowState,
   transition,
   formatPhase,
@@ -69,6 +75,9 @@ export interface OrchestratorOptions {
   client?: OpenAI;
   modelId?: string;
   modelLabel?: string;
+  continueConversation?: boolean;
+  budgetCapUSD?: number | null;
+  noOpen?: boolean;
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -79,7 +88,15 @@ export async function runOrchestrator(
   sessionId: string,
   options: OrchestratorOptions = {},
 ): Promise<void> {
-  const { noVerify = false, headless = false, image = null, systemPrompt, client, modelId } = options;
+  const {
+    noVerify = false,
+    headless = false,
+    image = null,
+    systemPrompt,
+    client,
+    modelId,
+    continueConversation = false,
+  } = options;
 
   // Resolve effective client and model — fall back to config if not provided by caller.
   const effectiveModelId = modelId ?? loadConfig().model;
@@ -129,10 +146,28 @@ export async function runOrchestrator(
     memoryLoaded: ctx.memory !== null,
   });
 
+  // Load prior conversation if --continue was requested.
+  let conversationSection = '';
+  if (continueConversation) {
+    const history = loadConversation(workdir);
+    if (history && history.turns.length > 0) {
+      conversationSection = summarizeHistory(history);
+      uiStream.push({
+        type: 'conversation_loaded',
+        priorTurns: history.turns.length,
+        conversationId: history.id,
+      });
+    }
+  }
+
   const baseContext = buildContextSection(ctx);
-  const contextSection = systemPrompt
-    ? `## Slash Command Instructions\n\n${systemPrompt}\n\n${baseContext || ''}`
-    : baseContext;
+  const contextSection = [
+    systemPrompt ? `## Slash Command Instructions\n\n${systemPrompt}` : '',
+    conversationSection ? `## ${conversationSection}` : '',
+    baseContext || '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   const { ignorePatterns } = ctx;
 
   // Use cleanRequest (mentions stripped) for everything downstream
@@ -145,6 +180,34 @@ export async function runOrchestrator(
   let doneSummary = '';
   const captureDone = (ev: UIEvent): void => {
     if (ev.type === 'done') doneSummary = ev.summary;
+  };
+
+  // ── Helper: track modified files for conversation turn + editor auto-open ───
+  const filesModifiedSet = new Set<string>();
+  const captureFilesModified = (ev: UIEvent): void => {
+    if (ev.type === 'file_modified') filesModifiedSet.add(ev.path);
+  };
+  uiStream.on('event', captureFilesModified);
+
+  // ── Persist the two conversation turns (user request + assistant summary) ──
+  const persistConversationTurns = (): void => {
+    try {
+      appendTurn(workdir, {
+        role: 'user',
+        content: request,
+        timestamp: new Date(),
+        sessionId,
+      });
+      if (doneSummary) {
+        appendTurn(workdir, {
+          role: 'assistant',
+          content: doneSummary,
+          timestamp: new Date(),
+          sessionId,
+          filesModified: Array.from(filesModifiedSet),
+        });
+      }
+    } catch { /* non-fatal */ }
   };
 
   // ── Simple path ──────────────────────────────────────────────────────────────
@@ -182,6 +245,8 @@ export async function runOrchestrator(
 
     workflow = advance(workflow, WorkflowPhase.COMPLETE);
     clearCheckpoint(sessionId);
+    persistConversationTurns();
+    uiStream.off('event', captureFilesModified);
     uiStream.ensureDone('All steps completed successfully.');
     return;
   }
@@ -215,6 +280,9 @@ export async function runOrchestrator(
     if (response.answer === 'n') {
       workflow = advance(workflow, WorkflowPhase.COMPLETE);
       clearCheckpoint(sessionId);
+      doneSummary = doneSummary || 'Plan rejected by user.';
+      persistConversationTurns();
+      uiStream.off('event', captureFilesModified);
       uiStream.push({ type: 'done', summary: 'Plan rejected by user.' });
       return;
     }
@@ -315,6 +383,8 @@ export async function runOrchestrator(
 
   workflow = advance(workflow, WorkflowPhase.COMPLETE);
   clearCheckpoint(sessionId);
+  persistConversationTurns();
+  uiStream.off('event', captureFilesModified);
   uiStream.ensureDone('All steps completed.');
 }
 

@@ -67,12 +67,13 @@ interface WorkflowIndicator {
 
 function LeftPanel({
   phase, filesModified, request, plan, gitBranch, commitCount, prPath,
-  contextSources, memoryWritten, workflow,
+  contextSources, memoryWritten, workflow, priorTurns,
 }: {
   phase: Phase; filesModified: string[]; request: string; plan: Plan | null;
   gitBranch: string | null; commitCount: number; prPath: string | null;
   contextSources: ContextSources | null; memoryWritten: boolean;
   workflow: WorkflowIndicator | null;
+  priorTurns: number | null;
 }) {
   const truncReq = request.length > 65 ? request.slice(0, 65) + '…' : request;
 
@@ -88,6 +89,13 @@ function LeftPanel({
 
   return (
     <Box flexDirection="column" gap={1}>
+      {priorTurns !== null && (
+        <Box flexDirection="column">
+          <Text dimColor>conversation</Text>
+          <Text color="cyan">↺ {priorTurns} prior turn{priorTurns === 1 ? '' : 's'}</Text>
+        </Box>
+      )}
+
       <Box flexDirection="column">
         <Text dimColor>phase</Text>
         <Text color={PHASE_COLORS[phase]} bold>{PHASE_LABELS[phase]}</Text>
@@ -231,6 +239,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const [memoryWritten, setMemoryWritten] = useState(false);
   const [verification, setVerification] = useState<VerificationState | undefined>(undefined);
   const [workflow, setWorkflow] = useState<WorkflowIndicator | null>(null);
+  const [priorTurns, setPriorTurns] = useState<number | null>(null);
 
   const handleDiffDone = useCallback((acceptedIndices: Set<number>) => {
     if (!diffState) return;
@@ -455,6 +464,15 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
           color: 'yellow',
         }]);
         break;
+
+      case 'conversation_loaded':
+        setPriorTurns(event.priorTurns);
+        setItems(prev => [...prev, {
+          kind: 'text', id: uid(),
+          text: `↺ Continuing conversation (${event.priorTurns} prior turn${event.priorTurns === 1 ? '' : 's'})`,
+          color: 'cyan',
+        }]);
+        break;
     }
   }, []);
 
@@ -529,6 +547,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
             contextSources={contextSources}
             memoryWritten={memoryWritten}
             workflow={workflow}
+            priorTurns={priorTurns}
           />
         </Box>
 

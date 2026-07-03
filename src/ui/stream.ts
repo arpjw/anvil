@@ -49,6 +49,7 @@ export type UIEvent =
   | { type: 'interrupt_requested' }
   | { type: 'interrupt_resolved'; action: 'continue' | 'stop' | 'rollback' }
   | { type: 'session_resumed'; sessionId: string; plan: Plan }
+  | { type: 'conversation_loaded'; priorTurns: number; conversationId: string }
   | {
       type: 'phase_transition';
       from: WorkflowPhase | null;
