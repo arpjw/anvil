@@ -79,13 +79,61 @@ async function main(): Promise<void> {
     process.exit(exitCode);
   }
 
+  // ── anvilai undo <filepath> [workdir] ────────────────────────────────────────
+  if (positional[0] === 'undo') {
+    const filepath = positional[1];
+    const workdir = resolve(positional[2] ?? process.cwd());
+    if (!filepath) {
+      console.error('Usage: anvilai undo <filepath> [workdir]');
+      process.exit(1);
+    }
+    const { undoFile, undoableFiles } = await import('./git/undo.js');
+    const { simpleGit } = await import('simple-git');
+    const git = simpleGit(workdir);
+    // Find the most recent session branch to derive the session id from.
+    const branches = await git.branch(['--list', 'anvil/session-*']);
+    const sessionBranch = Object.keys(branches.branches)
+      .filter((b) => b.startsWith('anvil/session-'))
+      .sort()
+      .pop();
+    if (!sessionBranch) {
+      console.error('No anvil session branch found in this repo.');
+      process.exit(1);
+    }
+    const match = /anvil\/session-([0-9a-f]{8})-/.exec(sessionBranch);
+    if (!match) {
+      console.error(`Could not parse session id from branch ${sessionBranch}`);
+      process.exit(1);
+    }
+    const sessionShort = match[1]!;
+    const undoable = await undoableFiles(workdir, sessionShort);
+    const rel = filepath.replace(/^\.\//, '');
+    if (!undoable.includes(rel) && !undoable.some((f) => f.endsWith('/' + rel))) {
+      console.error(`${rel} was not modified by session ${sessionShort}.`);
+      console.error(`Files this session touched:`);
+      for (const f of undoable) console.error(`  ${f}`);
+      process.exit(1);
+    }
+    try {
+      const { deleted, commitHash } = await undoFile(workdir, rel, sessionShort);
+      const verb = deleted ? 'Deleted' : 'Restored';
+      console.log(`✓ ${verb} ${rel} to pre-session state (commit ${commitHash.slice(0, 7)})`);
+    } catch (err) {
+      console.error(`✗ Undo failed: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   // ── First-run wizard ─────────────────────────────────────────────────────────
   // Skip on meta-commands (--version, init, doctor, config), on --headless
   // (CI shouldn't get interactive prompts), and on --dry-run.
   const isMetaCommand =
     positional[0] === 'init' ||
     positional[0] === 'doctor' ||
-    positional[0] === 'config';
+    positional[0] === 'config' ||
+    positional[0] === 'undo' ||
+    positional[0] === 'memory';
   if (
     !isHeadless &&
     !isDryRun &&

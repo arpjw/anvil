@@ -145,7 +145,10 @@ function LeftPanel({
         <Box flexDirection="column">
           <Text dimColor>modified</Text>
           {filesModified.map((f, i) => (
-            <Text key={i} color="green">+ {basename(f)}</Text>
+            <Box key={i} flexDirection="column">
+              <Text color="green">+ {basename(f)}</Text>
+              <Text dimColor>  [anvilai undo {basename(f)}]</Text>
+            </Box>
           ))}
         </Box>
       )}
