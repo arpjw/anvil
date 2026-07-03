@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { resolve } from 'path';
+import { uiStream } from '../ui/stream.js';
 
 const BLOCKED_PATTERNS: RegExp[] = [
   /rm\s+-rf\s+\//,
@@ -39,15 +40,50 @@ export async function runCommand(
 
   const absWorkdir = resolve(workdir);
 
+  const stdoutLines: string[] = [];
+  const stderrLines: string[] = [];
+
+  // Streaming buffers — flush on newline, emit a command_output event per line
+  // so TUIs / cloud dashboards can render progress before the process exits.
+  const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
+  const consume = (chunk: Buffer | string, which: 'stdout' | 'stderr'): void => {
+    buffers[which] += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+    while (true) {
+      const idx = buffers[which].indexOf('\n');
+      if (idx === -1) break;
+      const line = buffers[which].slice(0, idx);
+      buffers[which] = buffers[which].slice(idx + 1);
+      if (which === 'stdout') stdoutLines.push(line);
+      else stderrLines.push(line);
+      uiStream.push({ type: 'command_output', command, line, stream: which });
+    }
+  };
+
   try {
-    const proc = await execa('sh', ['-c', command], {
+    const subprocess = execa('sh', ['-c', command], {
       cwd: absWorkdir,
       timeout: timeoutSeconds * 1000,
       reject: false,
+      buffer: false, // stream mode
     });
 
-    let stdout = proc.stdout ?? '';
-    let stderr = proc.stderr ?? '';
+    subprocess.stdout?.on('data', (c) => consume(c, 'stdout'));
+    subprocess.stderr?.on('data', (c) => consume(c, 'stderr'));
+
+    const proc = await subprocess;
+
+    // Flush any partial trailing lines that never saw a newline.
+    if (buffers.stdout) {
+      stdoutLines.push(buffers.stdout);
+      uiStream.push({ type: 'command_output', command, line: buffers.stdout, stream: 'stdout' });
+    }
+    if (buffers.stderr) {
+      stderrLines.push(buffers.stderr);
+      uiStream.push({ type: 'command_output', command, line: buffers.stderr, stream: 'stderr' });
+    }
+
+    let stdout = stdoutLines.join('\n');
+    let stderr = stderrLines.join('\n');
 
     const combined = stdout.length + stderr.length;
     if (combined > MAX_COMBINED) {
@@ -71,8 +107,8 @@ export async function runCommand(
   } catch (err) {
     const e = err as { timedOut?: boolean; message?: string };
     return {
-      stdout: '',
-      stderr: e.message ?? String(err),
+      stdout: stdoutLines.join('\n'),
+      stderr: (stderrLines.length > 0 ? stderrLines.join('\n') + '\n' : '') + (e.message ?? String(err)),
       exitCode: 1,
       timedOut: e.timedOut ?? false,
     };

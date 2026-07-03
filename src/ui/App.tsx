@@ -23,7 +23,13 @@ type ToolItem    = { kind: 'tool';    id: number; name: string; args: string; re
 type ShadowItem  = { kind: 'shadow';  id: number; file: string; attempt: number; maxAttempts: number; outcome?: 'committed' | 'retry' | 'escalated'; errorCount?: number };
 type TextItem    = { kind: 'text';    id: number; text: string; color?: string };
 type PhaseItem   = { kind: 'phase';   id: number; label: string };
-type CommandItem = { kind: 'command'; id: number; command: string; exitCode?: number };
+type CommandItem = {
+  kind: 'command';
+  id: number;
+  command: string;
+  exitCode?: number;
+  outputLines: Array<{ text: string; stream: 'stdout' | 'stderr' }>;
+};
 type DisplayItem = ToolItem | ShadowItem | TextItem | PhaseItem | CommandItem;
 
 // ── Approval state ────────────────────────────────────────────────────────────
@@ -201,12 +207,39 @@ function renderItem(item: DisplayItem): JSX.Element {
       const iconColor = item.exitCode === undefined ? 'yellow' :
         item.exitCode === 0 ? 'green' : 'red';
       const label = item.command.length > 52 ? item.command.slice(0, 52) + '…' : item.command;
+
+      // While the command is running: show a rolling tail (last 8 lines).
+      // Once complete: collapse to "N lines" summary with the last 3 lines visible.
+      const done = item.exitCode !== undefined;
+      const visibleLines = done
+        ? item.outputLines.slice(-3)
+        : item.outputLines.slice(-8);
+      const hiddenCount = item.outputLines.length - visibleLines.length;
+
       return (
-        <Box gap={1}>
-          <Text color={iconColor as never}>{icon}</Text>
-          <Text dimColor>{label}</Text>
-          {item.exitCode !== undefined && (
-            <Text dimColor>exit {item.exitCode}</Text>
+        <Box flexDirection="column">
+          <Box gap={1}>
+            <Text color={iconColor as never}>{icon}</Text>
+            <Text color="blue">{label}</Text>
+            {done && (
+              <Text dimColor>exit {item.exitCode}</Text>
+            )}
+            {done && item.outputLines.length > 3 && (
+              <Text dimColor>· {item.outputLines.length} lines ({hiddenCount} hidden)</Text>
+            )}
+          </Box>
+          {visibleLines.length > 0 && (
+            <Box flexDirection="column" marginLeft={2}>
+              {visibleLines.map((ln, i) => (
+                <Text
+                  key={i}
+                  color={ln.stream === 'stderr' ? 'red' : undefined}
+                  dimColor={ln.stream === 'stdout'}
+                >
+                  {ln.text.length > 100 ? ln.text.slice(0, 100) + '…' : ln.text}
+                </Text>
+              ))}
+            </Box>
           )}
         </Box>
       );
@@ -312,7 +345,9 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         break;
 
       case 'command_running':
-        setItems(prev => [...prev, { kind: 'command', id: uid(), command: event.command }]);
+        setItems(prev => [...prev, {
+          kind: 'command', id: uid(), command: event.command, outputLines: [],
+        }]);
         break;
 
       case 'command_complete':
@@ -492,7 +527,22 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
       }
 
       case 'command_output':
-        // handled below in dedicated command_output UI (Feature 3)
+        setItems(prev => {
+          const next = [...prev];
+          for (let i = next.length - 1; i >= 0; i--) {
+            const it = next[i];
+            if (it.kind === 'command' && it.command === event.command && it.exitCode === undefined) {
+              // Cap live output to the last 200 lines so long test runs don't blow the buffer.
+              const cur = it.outputLines;
+              const appended = cur.length >= 200
+                ? [...cur.slice(-199), { text: event.line, stream: event.stream }]
+                : [...cur, { text: event.line, stream: event.stream }];
+              next[i] = { ...it, outputLines: appended };
+              break;
+            }
+          }
+          return next;
+        });
         break;
     }
   }, []);

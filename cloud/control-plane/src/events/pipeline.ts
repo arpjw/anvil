@@ -79,10 +79,16 @@ export async function processEvent(
     if (Object.keys(extras).length > 0) normalizedPayload = extras;
   }
 
-  try {
-    await repo.createEvent(sessionId, event.type, normalizedPayload);
-  } catch (err) {
-    logger.warn({ sessionId, eventType: event.type, err }, 'failed to persist event');
+  // Ephemeral event types are broadcast to SSE clients but not persisted to
+  // the events table — a long test run can emit thousands of command_output
+  // lines and none of them are worth an audit-trail row.
+  const EPHEMERAL_TYPES = new Set(['command_output', 'usage_update']);
+  if (!EPHEMERAL_TYPES.has(event.type)) {
+    try {
+      await repo.createEvent(sessionId, event.type, normalizedPayload);
+    } catch (err) {
+      logger.warn({ sessionId, eventType: event.type, err }, 'failed to persist event');
+    }
   }
 
   // Session-level checkpoint: mirror phase_transition into sessions.checkpoint_*
