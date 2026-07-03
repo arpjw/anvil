@@ -23,6 +23,22 @@ export interface ModelSpec {
 export const AVAILABLE_MODELS: ModelSpec[] = [
   // ── Anthropic ──────────────────────────────────────────────────────────────
   {
+    id: 'claude-fable-5',
+    label: 'Claude Fable 5',
+    provider: 'anthropic',
+    envKey: 'ANTHROPIC_API_KEY',
+    description: 'Anthropic most capable, $10/$50 per MTok',
+    baseURL: null,
+  },
+  {
+    id: 'claude-sonnet-5',
+    label: 'Claude Sonnet 5',
+    provider: 'anthropic',
+    envKey: 'ANTHROPIC_API_KEY',
+    description: 'Fast and intelligent, $3/$15 per MTok',
+    baseURL: null,
+  },
+  {
     id: 'claude-sonnet-4-6',
     label: 'Claude Sonnet 4.6',
     provider: 'anthropic',
@@ -35,7 +51,7 @@ export const AVAILABLE_MODELS: ModelSpec[] = [
     label: 'Claude Opus 4.8',
     provider: 'anthropic',
     envKey: 'ANTHROPIC_API_KEY',
-    description: 'Most capable, best for complex agentic tasks',
+    description: 'Complex agentic coding and enterprise work',
     baseURL: null,
   },
   {
@@ -63,6 +79,30 @@ export const AVAILABLE_MODELS: ModelSpec[] = [
     baseURL: null,
   },
   // ── OpenAI ─────────────────────────────────────────────────────────────────
+  {
+    id: 'gpt-5.5',
+    label: 'GPT-5.5',
+    provider: 'openai',
+    envKey: 'OPENAI_API_KEY',
+    description: 'OpenAI flagship, $5/$30 per MTok',
+    baseURL: 'https://api.openai.com/v1',
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    provider: 'openai',
+    envKey: 'OPENAI_API_KEY',
+    description: 'OpenAI balanced, $2.50/$15 per MTok',
+    baseURL: 'https://api.openai.com/v1',
+  },
+  {
+    id: 'gpt-5.4-mini',
+    label: 'GPT-5.4 Mini',
+    provider: 'openai',
+    envKey: 'OPENAI_API_KEY',
+    description: 'OpenAI fast and affordable, $0.75/$4.50 per MTok',
+    baseURL: 'https://api.openai.com/v1',
+  },
   {
     id: 'gpt-4o',
     label: 'GPT-4o',
@@ -130,6 +170,38 @@ export const AVAILABLE_MODELS: ModelSpec[] = [
     baseURL: 'https://open.bigmodel.cn/api/paas/v4',
   },
   // ── Moonshot ───────────────────────────────────────────────────────────────
+  {
+    id: 'kimi-k2.7-code',
+    label: 'Kimi K2.7 Code',
+    provider: 'moonshot',
+    envKey: 'MOONSHOT_API_KEY',
+    description: 'Moonshot coding-optimized, 256K context',
+    baseURL: 'https://api.moonshot.ai/v1',
+  },
+  {
+    id: 'kimi-k2.7-code-highspeed',
+    label: 'Kimi K2.7 Code Highspeed',
+    provider: 'moonshot',
+    envKey: 'MOONSHOT_API_KEY',
+    description: 'Moonshot coding, ~180 tok/s',
+    baseURL: 'https://api.moonshot.ai/v1',
+  },
+  {
+    id: 'kimi-k2.6',
+    label: 'Kimi K2.6',
+    provider: 'moonshot',
+    envKey: 'MOONSHOT_API_KEY',
+    description: 'Moonshot flagship multimodal, 256K context',
+    baseURL: 'https://api.moonshot.ai/v1',
+  },
+  {
+    id: 'kimi-k2.5',
+    label: 'Kimi K2.5',
+    provider: 'moonshot',
+    envKey: 'MOONSHOT_API_KEY',
+    description: 'Moonshot previous gen, 256K context',
+    baseURL: 'https://api.moonshot.ai/v1',
+  },
   {
     id: 'moonshot-v1-128k',
     label: 'Moonshot v1 · 128K context',
