@@ -1,5 +1,6 @@
 import { execa } from 'execa';
-import { resolve } from 'path';
+import { randomUUID } from 'node:crypto';
+import { commandDirectory, executionContext } from '../execution/context.js';
 import { StringDecoder } from 'string_decoder';
 import { uiStream } from '../ui/stream.js';
 
@@ -39,7 +40,19 @@ export async function runCommand(
     }
   }
 
-  const absWorkdir = resolve(workdir);
+  const context = executionContext();
+  let absWorkdir: string;
+  try {
+    absWorkdir = commandDirectory(workdir);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 300) throw new Error('Command timeout must be between 0 and 300 seconds.');
+    if (context) {
+      uiStream.throwIfCancelled();
+      if (context.commands === 'deny' || (context.commands === 'ask' && !(await uiStream.waitForCommandApproval(randomUUID(), command, absWorkdir)))) {
+        return { stdout: '', stderr: 'Command not approved. Headless runs require --allow-commands to execute shell commands and project checks.', exitCode: 126, timedOut: false };
+      }
+      uiStream.throwIfCancelled();
+    }
+  } catch (err) { return { stdout: '', stderr: (err as Error).message, exitCode: 126, timedOut: false }; }
 
   const captured: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
   const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
@@ -79,31 +92,57 @@ export async function runCommand(
     return captured;
   };
 
+  let childPid: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const stop = () => {
+    if (childPid && process.platform !== 'win32') {
+      try { process.kill(-childPid, 'SIGKILL'); } catch { /* group already exited */ }
+    }
+  };
+  const signal = context ? uiStream.signal : undefined;
+  signal?.addEventListener('abort', stop, { once: true });
   try {
+    const env = context ? Object.fromEntries(['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'ComSpec', 'PATHEXT']
+      .flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]])) : process.env;
     const subprocess = execa('sh', ['-c', command], {
       cwd: absWorkdir,
       timeout: timeoutSeconds * 1000,
+      cancelSignal: signal,
+      forceKillAfterDelay: 500,
+      detached: process.platform !== 'win32',
+      extendEnv: false,
+      env,
       reject: false,
       buffer: false, // stream mode
     });
 
+    childPid = subprocess.pid;
+    timer = setTimeout(() => { timedOut = true; stop(); }, timeoutSeconds * 1000);
+    if (signal?.aborted) stop();
     subprocess.stdout?.on('data', (c) => consume(c, 'stdout'));
     subprocess.stderr?.on('data', (c) => consume(c, 'stderr'));
 
     const proc = await subprocess;
+    timedOut ||= proc.timedOut ?? false;
 
     return {
       ...output(),
-      exitCode: proc.exitCode ?? (proc.failed ? 1 : 0),
-      timedOut: proc.timedOut ?? false,
+      exitCode: signal?.aborted ? 130 : timedOut ? 124 : proc.exitCode ?? (proc.failed ? 1 : 0),
+      timedOut: timedOut || (proc.timedOut ?? false),
     };
   } catch (err) {
     const e = err as { timedOut?: boolean; message?: string };
+    timedOut ||= e.timedOut ?? false;
     return {
       ...output(),
       stderr: (captured.stderr + '\n' + (e.message ?? String(err))).slice(-MAX_COMBINED),
       exitCode: 1,
-      timedOut: e.timedOut ?? false,
+      timedOut: timedOut || (e.timedOut ?? false),
     };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', stop);
+    if (context || timedOut || signal?.aborted) stop();
   }
 }

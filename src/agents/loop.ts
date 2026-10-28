@@ -53,6 +53,7 @@ export async function runStreamingLoop(
   let summary = '';
 
   outer: while (iterations < maxIterations) {
+    uiStream.throwIfCancelled();
     iterations++;
 
     const stream = await client.chat.completions.create({
@@ -62,7 +63,7 @@ export async function runStreamingLoop(
       tool_choice: 'auto',
       stream: true,
       stream_options: { include_usage: true },
-    });
+    }, { signal: uiStream.signal });
 
     let textContent = '';
     const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {};
@@ -156,6 +157,7 @@ export async function runStreamingLoop(
       uiStream.push({ type: 'tool_call', name: tc.name, args: describeArgs(tc.arguments) });
 
       const { result, done } = await executeToolFn(tc.name, args);
+      uiStream.throwIfCancelled();
       const preview = result.length > 120 ? result.slice(0, 120) + '...' : result;
       uiStream.push({ type: 'tool_result', name: tc.name, preview });
 

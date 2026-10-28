@@ -50,6 +50,7 @@ export type GithubClient = {
       sha?: string | null;
     },
   ) => Promise<void>;
+  deleteFile: (owner: string, repo: string, args: { path: string; branch: string; message: string; sha: string }) => Promise<void>;
   createPullRequest: (
     owner: string,
     repo: string,

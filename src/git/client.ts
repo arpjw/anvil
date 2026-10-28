@@ -1,4 +1,5 @@
 import { simpleGit, type DefaultLogFields } from 'simple-git';
+import { execa } from 'execa';
 import { mkdirSync, writeFileSync, readFileSync, realpathSync } from 'fs';
 import { join, relative } from 'path';
 import { workspacePath } from '../tools/workspace_path.js';
@@ -63,7 +64,7 @@ export async function createSessionBranch(workdir: string, sessionId: string): P
   const originalBranch = current === 'HEAD' ? baseCommit : current;
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const branchName = `anvil/session-${sessionId.slice(0, 8)}-${dateStr}`;
-  await git.checkoutLocalBranch(branchName);
+  await execa('git', ['-c', 'core.hooksPath=/dev/null', 'checkout', '-b', branchName], { cwd: workdir });
   const metaDir = join(workdir, '.anvil');
   mkdirSync(metaDir, { recursive: true });
   const metaPath = join(metaDir, `session-${sessionId.slice(0, 8)}.json`);
@@ -83,7 +84,7 @@ export async function commitFile(workdir: string, filepath: string, message: str
   }
   if (!(await git.raw(['diff', '--cached', '--name-only', '--', rel])).trim()) return '';
   // --only keeps unrelated staged changes out of the session commit.
-  const result = await git.raw(['commit', '--only', '-m', message, '--', rel]);
+  const result = await execa('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'commit', '--only', '-m', message, '--', rel], { cwd: workdir });
   void result;
   return (await git.revparse(['HEAD'])).trim();
 }

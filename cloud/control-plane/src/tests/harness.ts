@@ -558,6 +558,7 @@ export type StubbedGithub = {
   existingBranches: Set<string>;
   fileShas: Map<string, string>;
   putFileCalls: StubbedPutFileCall[];
+  deleteFileCalls: Array<{ owner: string; repo: string; path: string; branch: string; message: string; sha: string }>;
   prCalls: StubbedPrCall[];
   prResponses: Map<string, { url: string; number: number }>;
   userRepos: Array<{ fullName: string; defaultBranch: string; private: boolean }>;
@@ -620,6 +621,10 @@ export function createGithubStub(stub: StubbedGithub) {
           `${owner}/${repo}/${args.branch}/${args.path}`,
           `sha-${stub.putFileCalls.length}`,
         );
+      },
+      async deleteFile(owner, repo, args) {
+        stub.deleteFileCalls.push({ owner, repo, ...args });
+        stub.fileShas.delete(`${owner}/${repo}/${args.branch}/${args.path}`);
       },
       async createPullRequest(owner, repo, args) {
         stub.prCalls.push({ owner, repo, ...args });
@@ -725,6 +730,7 @@ export function createHarness(): Harness {
     existingBranches: new Set(),
     fileShas: new Map(),
     putFileCalls: [],
+    deleteFileCalls: [],
     prCalls: [],
     prResponses: new Map(),
     userRepos: [],

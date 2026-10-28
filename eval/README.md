@@ -22,7 +22,7 @@ For every task:
 5. **Resolved** iff every `FAIL_TO_PASS` now passes **and** every `PASS_TO_PASS` still passes.
 6. Persist `<instance_id>.json` to the output dir before moving on, then delete the working copy.
 
-Batches of `--concurrency` tasks (default 3) run at once.
+The shared agent runtime runs one task per process (`--concurrency 1`, the default). Higher values are rejected. The harness already creates a disposable checkout per task; it explicitly uses in-place execution there, allows test commands, and disables automatic commits so staged test patches remain separate. These checkouts are not OS sandboxes.
 
 ## What this harness does NOT do
 

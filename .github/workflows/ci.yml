@@ -19,7 +19,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check
-      - run: npm ci && npm run build
+      - run: npm ci && npm run build && npm test
         working-directory: cloud/vm/runtime
   control-plane:
     runs-on: ubuntu-latest

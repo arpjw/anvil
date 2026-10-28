@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'path';
 
 /** Resolve a project file, including symlinks, without allowing workspace escapes. */
-export function workspacePath(workdir: string, path: string): string {
+export function workspacePath(workdir: string, path: string, allowRoot = false): string {
   if (!path || path.includes('\0')) throw new Error('A valid file path is required.');
   const lexicalRoot = resolve(workdir);
   const root = realpathSync(lexicalRoot);
@@ -14,7 +14,7 @@ export function workspacePath(workdir: string, path: string): string {
     const rel = relative(root, candidate);
     return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
   };
-  if (!inside(target) || target === root) throw new Error('File must be inside the workspace.');
+  if (!inside(target) || (!allowRoot && target === root)) throw new Error('File must be inside the workspace.');
   if (relative(root, target).split(sep).includes('.git')) throw new Error('Editing Git metadata is not allowed.');
   let ancestor = target;
   while (!existsSync(ancestor)) ancestor = dirname(ancestor);

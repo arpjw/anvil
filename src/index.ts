@@ -12,6 +12,7 @@ import { HELP, parseCli } from './setup/cli.js';
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const { values, positionals, budget: budgetCapUSD } = parseCli(argv);
+  const executionOptions = { isolation: values['no-isolate'] ? 'none' as const : 'worktree' as const, ...(values['allow-commands'] ? { commands: 'allow' as const } : {}) };
   const positional = [...positionals];
   const isHeadless = !!(values.headless || values['stream-json']);
   const isDryRun = !!values['dry-run'];
@@ -245,9 +246,9 @@ async function main(): Promise<void> {
 
     if (isHeadless) {
       const { runHeadless } = await import('./execution/headless.js');
-      const result = await runHeadless('', workdir, noVerify, undefined, modelFlag, { resumeId: sessionId, budgetCapUSD, streamJson: values['stream-json'] });
+      const result = await runHeadless('', workdir, noVerify, undefined, modelFlag, { ...executionOptions, resumeId: sessionId, budgetCapUSD, streamJson: values['stream-json'] });
       console.log(JSON.stringify(values['stream-json'] ? { type: 'result', ...result } : result));
-      process.exit(result.success ? 0 : 1);
+      process.exit(result.status === 'aborted' ? 130 : result.success ? 0 : 1);
     }
 
     const { unmount } = render(
@@ -256,12 +257,13 @@ async function main(): Promise<void> {
         workdir,
         sessionId,
       }),
+      { exitOnCtrlC: false },
     );
 
     const { resumeSession } = await import('./execution/resume.js');
     try {
-      const result = await resumeSession(sessionId, workdir, { noVerify, noOpen, modelId: modelFlag, budgetCapUSD });
-      process.exitCode = result.status === 'complete' ? 0 : 1;
+      const result = await resumeSession(sessionId, workdir, { ...executionOptions, noVerify, noOpen, modelId: modelFlag, budgetCapUSD });
+      process.exitCode = result.status === 'aborted' ? 130 : result.status === 'complete' ? 0 : 1;
       await new Promise(r => setTimeout(r, 500));
       unmount();
       process.exit(process.exitCode ?? 0);
@@ -376,9 +378,9 @@ async function main(): Promise<void> {
   if (isHeadless && !isDryRun) {
     const { runHeadless } = await import('./execution/headless.js');
     try {
-      const result = await runHeadless(resolvedRequest, workdir, noVerify, client, modelId, { image: imageBlock, systemPrompt, continueConversation: continueConv, budgetCapUSD, streamJson: values['stream-json'] });
+      const result = await runHeadless(resolvedRequest, workdir, noVerify, client, modelId, { ...executionOptions, image: imageBlock, systemPrompt, continueConversation: continueConv, budgetCapUSD, streamJson: values['stream-json'] });
       process.stdout.write(JSON.stringify(values['stream-json'] ? { type: 'result', ...result } : result, null, values['stream-json'] ? undefined : 2) + '\n');
-      process.exit(result.success ? 0 : 1);
+      process.exit(result.status === 'aborted' ? 130 : result.success ? 0 : 1);
     } catch (err) {
       const msg = (err as Error).message;
       process.stdout.write(JSON.stringify({ success: false, error: msg }, null, 2) + '\n');
@@ -428,10 +430,12 @@ async function main(): Promise<void> {
   // ── Normal TUI mode ───────────────────────────────────────────────────────────
   const { unmount } = render(
     React.createElement(App, { request: resolvedRequest, workdir, sessionId, modelLabel }),
+    { exitOnCtrlC: false },
   );
 
   try {
     const result = await runAgent(resolvedRequest, workdir, sessionId, {
+      ...executionOptions,
       noVerify,
       image: imageBlock,
       systemPrompt,
@@ -444,7 +448,7 @@ async function main(): Promise<void> {
     });
     await new Promise(r => setTimeout(r, 500));
     unmount();
-    process.exit(result.status === 'complete' ? 0 : 1);
+    process.exit(result.status === 'aborted' ? 130 : result.status === 'complete' ? 0 : 1);
   } catch (err: unknown) {
     uiStream.push({ type: 'error', message: (err as Error).message });
     await new Promise(r => setTimeout(r, 500));

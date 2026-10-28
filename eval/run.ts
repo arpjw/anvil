@@ -35,6 +35,7 @@ export async function runEval(
   tasks: SWETask[],
   options: RunOptions,
 ): Promise<EvalResult[]> {
+  if (options.concurrency !== 1) throw new Error('The shared agent runtime supports one evaluation task per process. Use --concurrency 1.');
   mkdirSync(options.outputDir, { recursive: true });
   const workRoot = options.workRoot ?? DEFAULT_WORK_ROOT;
   mkdirSync(workRoot, { recursive: true });
@@ -185,6 +186,7 @@ async function runAnvilAgainst(
       true,
       undefined,
       modelId,
+      { isolation: 'none', commands: 'allow', autoBranch: false },
     );
     return {
       success: res.success,

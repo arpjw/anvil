@@ -265,6 +265,8 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [filesModified, setFilesModified] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
+  const [commandApproval, setCommandApproval] = useState<{ id: string; command: string; workdir: string } | null>(null);
+  const [executionPath, setExecutionPath] = useState(workdir);
   const [diffState, setDiffState] = useState<DiffState | null>(null);
   const [interruptActive, setInterruptActive] = useState(false);
   const [startTime] = useState(() => Date.now());
@@ -399,6 +401,16 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         setPlan(event.plan);
         break;
 
+      case 'command_approval_needed':
+        setCommandApproval(event);
+        break;
+      case 'workspace_ready':
+        setExecutionPath(event.workdir);
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: `Workspace: ${event.workdir}`, color: 'cyan' }]);
+        break;
+      case 'transaction_applied':
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: `Applied transaction: ${event.paths.length} files`, color: 'green' }]);
+        break;
       case 'approval_needed':
         setApproval({ feedbackMode: false, text: '' });
         break;
@@ -413,6 +425,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         break;
 
       case 'session_cancelled':
+        setCommandApproval(null); setDiffState(null); setApproval(null);
         setPhase('done');
         setItems(prev => [...prev, { kind: 'text', id: uid(), text: event.summary, color: 'yellow' }]);
         break;
@@ -434,6 +447,10 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         setItems(prev => [...prev, { kind: 'text', id: uid(), text: `⎇ ${event.branchName}`, color: 'cyan' }]);
         break;
 
+      case 'session_committed':
+        setCommitCount(prev => prev + 1);
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: `Session committed [${event.commitHash.slice(0, 7)}]: ${event.paths.length} files. Original checkout unchanged.`, color: 'green' }]);
+        break;
       case 'file_committed':
         setCommitCount(prev => prev + 1);
         setItems(prev => [...prev, {
@@ -567,6 +584,18 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
   const { isRawModeSupported } = useStdin();
 
   useInput((input, key) => {
+    if (key.ctrl && input === 'c') {
+      if (uiStream.signal.aborted) process.exit(130);
+      uiStream.cancelSession('Stopped by user. Changes remain in the session workspace.');
+      return;
+    }
+    if (commandApproval) {
+      if (input.toLowerCase() === 'y' || input.toLowerCase() === 'n') {
+        uiStream.resolveCommand(commandApproval.id, input.toLowerCase() === 'y');
+        setCommandApproval(null);
+      }
+      return;
+    }
     // DiffView handles its own input when active
     if (diffState) return;
 
@@ -607,6 +636,7 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
       <Box flexDirection="column" paddingX={1} marginBottom={1}>
         <Text color="yellow">{HEADER}</Text>
         <Text dimColor>session {sessionId.slice(0, 8)} · {basename(workdir)}</Text>
+        <Text dimColor>workspace {executionPath}</Text>
       </Box>
 
       {/* Two-panel layout */}
@@ -655,6 +685,12 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         </Box>
       </Box>
 
+      {commandApproval && <Box flexDirection="column" borderStyle="single" borderColor="yellow" paddingX={1}>
+        <Text color="yellow">Run this command with your account permissions?</Text>
+        <Text>{commandApproval.command}</Text>
+        <Text dimColor>Directory: {commandApproval.workdir}</Text>
+        <Text>[y] allow once  [n] deny</Text>
+      </Box>}
       {/* Plan + approval gate */}
       {plan && approval && !diffState && (
         <Box flexDirection="column" paddingX={1}>

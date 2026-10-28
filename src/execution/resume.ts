@@ -7,7 +7,7 @@ import type { SessionResult } from '../session/result.js';
 export async function resumeSession(sessionId: string, workdir: string, options: OrchestratorOptions = {}): Promise<SessionResult> {
   if (!/^[a-zA-Z0-9-]{8,}$/.test(sessionId)) throw new Error('Invalid session id.');
   const dir = join('/tmp/anvil', sessionId);
-  let saved: { workdir: string; request: string; modelId: string };
+  let saved: { workdir: string; request: string; modelId: string; isolation?: 'worktree' | 'none' };
   let plan: Plan;
   try {
     saved = JSON.parse(readFileSync(join(dir, 'session.json'), 'utf-8'));
@@ -17,6 +17,6 @@ export async function resumeSession(sessionId: string, workdir: string, options:
   // File completion cannot be inferred from old log lines: a file can have
   // several plan steps, and its contents may have changed since the last run.
   return runOrchestrator(saved.request, workdir, sessionId, {
-    ...options, modelId: options.modelId ?? saved.modelId, resumePlan: plan,
+    ...options, isolation: saved.isolation ?? 'none', modelId: options.modelId ?? saved.modelId, resumePlan: plan,
   });
 }

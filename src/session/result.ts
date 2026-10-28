@@ -4,6 +4,10 @@ import { join } from 'path';
 export interface SessionResult {
   sessionId: string;
   workdir: string;
+  sourceWorkdir?: string;
+  isolation?: 'worktree' | 'none';
+  baseCommit?: string;
+  commitHash?: string;
   request: string;
   modelId: string;
   status: 'complete' | 'failed' | 'aborted';

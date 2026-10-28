@@ -54,6 +54,7 @@ export async function runVerification(
   await validationEngine.start();
   try {
     let result = await validationEngine.validate({ workdir, sessionId });
+    uiStream.throwIfCancelled();
 
     if (result.passed) {
       if (result.checks.every(c => c.status === 'skipped')) {
@@ -66,6 +67,10 @@ export async function runVerification(
 
     for (let round = 1; round <= MAX_ROUNDS; round++) {
       const failureLines = formatFailures(result);
+      if (!result.errors.some(error => error.fixable)) {
+        uiStream.push({ type: 'verification_fail', failures: failureLines });
+        return { passed: false, rounds: round - 1, remainingFailures: failureLines };
+      }
       const fixPlan = await validationEngine.planFix({
         workdir,
         errors: result.errors,
@@ -80,9 +85,13 @@ export async function runVerification(
         fixPlan.plan,
       ].join('\n');
 
-      await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction, client, modelId, budgetCapUSD);
+      const repair = await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction, client, modelId, budgetCapUSD);
+      uiStream.throwIfCancelled();
+      if (!repair.success) return { passed: false, rounds: round, remainingFailures: repair.escalations };
+
 
       result = await validationEngine.validate({ workdir, sessionId });
+      uiStream.throwIfCancelled();
 
       if (result.passed) {
         uiStream.push({ type: 'verification_pass', rounds: round });

@@ -127,6 +127,10 @@ export const octokitGithubClient: GithubClientFactory = (accessToken) => {
         throwNotAccessible(err);
       }
     },
+    async deleteFile(owner, repo, args) {
+      try { await client.repos.deleteFile({ owner, repo, ...args }); }
+      catch (err) { throwNotAccessible(err); }
+    },
     async getRepoTree(owner, repo, ref) {
       try {
         const { data } = await client.git.getTree({

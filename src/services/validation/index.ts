@@ -89,7 +89,9 @@ export class ValidationEngine {
       const commands: string[] = [];
       const runner: typeof runCommand = async (...args) => {
         commands.push(args[0]);
-        return run(...args);
+        const result = await run(...args);
+        if (result.exitCode === 126) throw new Error(result.stderr || 'Command execution was not authorized.');
+        return result;
       };
       if (!skipped) {
         try { await action(runner); }

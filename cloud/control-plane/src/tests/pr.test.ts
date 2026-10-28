@@ -155,3 +155,18 @@ describe('POST /sessions/:id/pr', () => {
     expect(res.status).toBe(404);
   });
 });
+
+test('PR publishing preserves deletions and distinguishes them from empty files', async () => {
+  const { token, sessionId } = await seedUser();
+  const branch = `anvil/session-${sessionId.slice(0, 8)}`;
+  h.github.fileShas.set(`octocat/hello/${branch}/removed.txt`, 'old-sha');
+  for (const [filepath, newContent] of [['removed.txt', null], ['already-gone.txt', null], ['empty.txt', '']] as const) {
+    const id = crypto.randomUUID();
+    h.repo._diffs.set(id, { id, sessionId, filepath, originalContent: 'old', newContent, status: 'approved', createdAt: new Date() });
+  }
+  const res = await h.authedFetch(`/api/v1/sessions/${sessionId}/pr`, { method: 'POST', token });
+  expect(res.status).toBe(200);
+  expect(h.github.deleteFileCalls.map(c => c.path)).toEqual(['removed.txt']);
+  expect(h.github.deleteFileCalls[0]?.sha).toBe('old-sha');
+  expect(h.github.putFileCalls.map(c => [c.path, c.content])).toEqual([['empty.txt', '']]);
+});

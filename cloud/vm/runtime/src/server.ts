@@ -61,6 +61,7 @@ type RunState = {
   sessionId: string | null;
   forwardListener: ((event: unknown) => void) | null;
   agent: AnvilAgent | null;
+  controller: AbortController | null;
 };
 
 async function handleStart(
@@ -76,9 +77,11 @@ async function handleStart(
     return;
   }
 
+  state.sessionId = payload.sessionId;
+  const controller = new AbortController();
+  state.controller = controller;
   const agent = await loadAnvilAgent();
   state.agent = agent;
-  state.sessionId = payload.sessionId;
 
   const forward = (raw: unknown) => {
     const event = raw as import('anvil-agent').UIEvent;
@@ -101,7 +104,7 @@ async function handleStart(
       payload.request,
       payload.repoPath,
       payload.sessionId,
-      { modelId: payload.model, client, headless: true, noOpen: true, autoBranch: false },
+      { modelId: payload.model, client, headless: true, noOpen: true, autoBranch: false, isolation: 'none', commands: 'allow', signal: controller.signal },
     );
     if (result.status === 'complete') send(ws, { type: 'done', payload: { summary: result.summary } });
     else if (result.status === 'aborted') send(ws, { type: 'aborted' });
@@ -118,6 +121,7 @@ async function handleStart(
       state.forwardListener = null;
     }
     state.sessionId = null;
+    state.controller = null;
   }
 }
 
@@ -211,9 +215,7 @@ function handleConnection(ws: WebSocket, state: RunState): void {
           );
           break;
         case 'abort':
-          send(ws, { type: 'aborted' });
-          ws.close(1000, 'aborted by control plane');
-          setTimeout(() => process.exit(0), 100);
+          state.controller?.abort();
           break;
         default: {
           const exhaustive: never = message;
@@ -242,7 +244,7 @@ function handleConnection(ws: WebSocket, state: RunState): void {
 
 function start(): void {
   const wss = new WebSocketServer({ port: PORT });
-  const state: RunState = { sessionId: null, forwardListener: null, agent: null };
+  const state: RunState = { sessionId: null, forwardListener: null, agent: null, controller: null };
   let activeConnection: WebSocket | null = null;
 
   wss.on('connection', (ws) => {
@@ -261,7 +263,8 @@ function start(): void {
   });
 
   wss.on('listening', () => {
-    console.log(`[anvil-runtime] listening on :${PORT}`);
+    const address = wss.address();
+    console.log(`[anvil-runtime] listening on :${typeof address === 'object' && address ? address.port : PORT}`);
   });
 
   wss.on('error', (err) => {

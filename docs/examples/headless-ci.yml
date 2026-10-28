@@ -28,10 +28,16 @@ jobs:
         run: |
           git config user.name "Anvil CI"
           git config user.email "anvil@example.invalid"
-          node dist/index.js --headless --budget 2 "$ANVIL_REQUEST" . > result.json
+          node dist/index.js --headless --allow-commands --budget 2 "$ANVIL_REQUEST" . > result.json
       - name: Save result and reviewable patch
         if: always()
-        run: git diff "${{ github.sha }}" -- . ':!result.json' > changes.patch
+        run: |
+          execution_dir=$(jq -r '.workdir // empty' result.json)
+          if [ -n "$execution_dir" ] && [ -d "$execution_dir" ]; then
+            git -C "$execution_dir" diff "${{ github.sha }}" -- . ':!.anvil' > changes.patch
+          else
+            touch changes.patch
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

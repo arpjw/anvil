@@ -15,6 +15,10 @@ export type UIEvent =
   | { type: 'shadow_result'; file: string; errorCount: number; outcome: 'committed' | 'rejected' | 'retry' | 'escalated' }
   | { type: 'plan_ready'; plan: Plan }
   | { type: 'approval_needed' }
+  | { type: 'session_committed'; commitHash: string; paths: string[] }
+  | { type: 'workspace_ready'; sourceWorkdir: string; workdir: string; branchName: string }
+  | { type: 'transaction_applied'; transactionId: string; paths: string[] }
+  | { type: 'command_approval_needed'; id: string; command: string; workdir: string }
   | { type: 'file_modified'; path: string }
   | { type: 'done'; summary: string }
   | { type: 'session_failed'; message: string }
@@ -45,8 +49,8 @@ export type UIEvent =
   | {
       type: 'file_diff';
       filepath: string;
-      originalContent: string;
-      newContent: string;
+      originalContent: string | null;
+      newContent: string | null;
       diff: FileDiff;
       sessionId: string;
     }
@@ -80,13 +84,31 @@ class UIStream extends EventEmitter {
     this.emit('event', event);
   }
 
-  // Called by orchestrator — blocks until the user responds via the UI.
-  waitForApproval(): Promise<{ answer: 'y' | 'n' | 'revise'; feedback?: string }> {
-    return new Promise(resolve => {
-      this.once('_approval', resolve);
-      this.push({ type: 'approval_needed' });
+  private controller = new AbortController();
+  get signal(): AbortSignal { return this.controller.signal; }
+  throwIfCancelled(): void { this.signal.throwIfAborted(); }
+  cancelSession(reason = 'Stopped by user.'): void { this.controller.abort(new Error(reason)); }
+
+  private waitFor<T>(name: string, announce?: () => void): Promise<T> {
+    this.throwIfCancelled();
+    return new Promise((resolve, reject) => {
+      const signal = this.signal;
+      const cleanup = () => { this.off(name, accept); signal.removeEventListener('abort', abort); };
+      const accept = (value: T) => { cleanup(); resolve(value); };
+      const abort = () => { cleanup(); reject(signal.reason); };
+      this.once(name, accept); signal.addEventListener('abort', abort, { once: true });
+      announce?.();
     });
   }
+
+  waitForApproval(): Promise<{ answer: 'y' | 'n' | 'revise'; feedback?: string }> {
+    return this.waitFor('_approval', () => this.push({ type: 'approval_needed' }));
+  }
+
+  waitForCommandApproval(id: string, command: string, workdir: string): Promise<boolean> {
+    return this.waitFor(`_command:${id}`, () => this.push({ type: 'command_approval_needed', id, command, workdir }));
+  }
+  resolveCommand(id: string, allow: boolean): void { this.emit(`_command:${id}`, allow); }
 
   // Called by App.tsx when the user makes a decision.
   resolveApproval(answer: 'y' | 'n' | 'revise', feedback?: string): void {
@@ -95,10 +117,7 @@ class UIStream extends EventEmitter {
 
   // Called by shadow/workspace.ts after LSP clean — blocks until user resolves hunks.
   waitForDiffResolution(filepath: string, diff: FileDiff): Promise<Set<number>> {
-    return new Promise(resolve => {
-      this.once(`_diff_resolved:${filepath}`, resolve);
-      this.push({ type: 'diff_ready', filepath, diff, hunkCount: diff.hunks.length });
-    });
+    return this.waitFor(`_diff_resolved:${filepath}`, () => this.push({ type: 'diff_ready', filepath, diff, hunkCount: diff.hunks.length }));
   }
 
   // Called by DiffView (or headless handler) with the set of accepted hunk indices.
@@ -127,7 +146,7 @@ class UIStream extends EventEmitter {
     if (!this._done) this.push({ type: 'done', summary });
   }
 
-  resetSession(): void { this._done = false; }
+  resetSession(): void { this._done = false; this.controller = new AbortController(); }
 }
 
 export const uiStream = new UIStream();

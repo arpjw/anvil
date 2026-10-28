@@ -62,6 +62,7 @@ function makeAppDeps(repo: ReturnType<typeof createMemoryRepository>): AppDeps {
       return null;
     },
     async putFile() {},
+    async deleteFile() {},
     async createPullRequest() {
       return { url: '', number: 0 };
     },

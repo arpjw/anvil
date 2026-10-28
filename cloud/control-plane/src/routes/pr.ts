@@ -58,11 +58,15 @@ export async function openPr({
       diff.filepath,
       headBranch,
     );
+    if (diff.newContent === null) {
+      if (existingSha) await gh.deleteFile(owner, repoName, { path: diff.filepath, branch: headBranch, message: `anvil: delete ${diff.filepath}`, sha: existingSha });
+      continue;
+    }
     await gh.putFile(owner, repoName, {
       path: diff.filepath,
       branch: headBranch,
       message: `anvil: ${diff.filepath}`,
-      content: diff.newContent ?? '',
+      content: diff.newContent,
       sha: existingSha,
     });
   }

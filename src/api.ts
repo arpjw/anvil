@@ -5,3 +5,6 @@ export { uiStream, type UIEvent } from './ui/stream.js';
 export { ValidationEngine } from './services/validation/index.js';
 export { AVAILABLE_MODELS, buildClient } from './setup/config.js';
 export type { SessionResult } from './session/result.js';
+
+export { applyTransaction, recoverTransaction, type FileEdit } from './workspace/transaction.js';
+export { prepareWorkspace } from './workspace/isolated.js';

@@ -49,6 +49,7 @@ export async function writeFile(
       return `Wrote ${fullPath} (unchanged)`;
     }
     try {
+      uiStream.throwIfCancelled();
       workspacePath(workdir, path);
       commitContent(fullPath, result.finalContent, { content: originalContent, exists: originalExists });
       recordCommitted(sessionId, fullPath, result.finalContent);

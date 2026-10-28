@@ -45,7 +45,7 @@ test('completion happens after verification, persists status, and cleans up list
   const events: UIEvent[] = []; const listener = (e: UIEvent) => events.push(e);
   const baseline = uiStream.listenerCount('event'); uiStream.on('event', listener);
   t.after(() => uiStream.off('event', listener));
-  const result = await runOrchestrator('Explain this project', root, id, { client: mockClient(true), autoBranch: false, headless: true });
+  const result = await runOrchestrator('Explain this project', root, id, { client: mockClient(true), headless: true, isolation: 'none', commands: 'allow' });
   assert.equal(result.status, 'complete');
   assert.ok(events.findIndex(e => e.type === 'verification_pass') < events.findIndex(e => e.type === 'done'));
   assert.equal(readSessionResults(root)[0]!.status, 'complete');
@@ -57,7 +57,7 @@ test('incomplete executor output is a failure with a recoverable plan', async t 
   t.after(() => { rmSync(root, { recursive: true, force: true }); clearSession(id); });
   const events: UIEvent[] = []; const listener = (e: UIEvent) => events.push(e); uiStream.on('event', listener);
   t.after(() => uiStream.off('event', listener));
-  await assert.rejects(runOrchestrator('Explain this project', root, id, { client: mockClient(false), autoBranch: false, headless: true }), /before confirming completion/);
+  await assert.rejects(runOrchestrator('Explain this project', root, id, { client: mockClient(false), autoBranch: false, headless: true, isolation: 'none', commands: 'allow' }), /before confirming completion/);
   assert.equal(events.some(e => e.type === 'done'), false);
   assert.equal(readSessionResults(root)[0]!.status, 'failed');
   assert.equal(existsSync(join('/tmp/anvil', id, 'plan.json')), true);

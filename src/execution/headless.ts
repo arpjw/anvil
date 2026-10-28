@@ -18,6 +18,10 @@ export interface HeadlessResult {
   remainingFailures: string[];
   status: 'complete' | 'failed' | 'aborted';
   summary: string;
+  workdir?: string;
+  sourceWorkdir?: string;
+  isolation?: 'worktree' | 'none';
+  commitHash?: string;
 }
 
 export interface HeadlessOptions extends OrchestratorOptions {
@@ -37,6 +41,8 @@ export async function runHeadless(request: string, workdir: string, noVerify?: b
     else if (event.type === 'phase_transition') console.error(`[anvil] ${event.index}/${event.total} ${event.label}`);
     else if (event.type === 'error' || event.type === 'session_failed') console.error(`[anvil] ${event.message}`);
     switch (event.type) {
+      case 'workspace_ready': result.workdir = event.workdir; result.sourceWorkdir = event.sourceWorkdir; result.isolation = 'worktree'; break;
+      case 'session_committed': result.commitHashes.push(event.commitHash); result.commitHash = event.commitHash; break;
       case 'file_modified': if (!result.filesModified.includes(event.path)) result.filesModified.push(event.path); break;
       case 'file_committed': result.commitHashes.push(event.commitHash); break;
       case 'branch_created': result.branchName = event.branchName; break;
@@ -51,6 +57,8 @@ export async function runHeadless(request: string, workdir: string, noVerify?: b
     const session: SessionResult = options.resumeId
       ? await resumeSession(options.resumeId, resolve(workdir), opts)
       : await runOrchestrator(request, resolve(workdir), sessionId, opts);
+    result.workdir = session.workdir; result.sourceWorkdir = session.sourceWorkdir; result.isolation = session.isolation; result.commitHash = session.commitHash;
+    result.filesModified = session.filesModified;
     result.status = session.status;
     result.success = session.status === 'complete';
     result.summary = session.summary;

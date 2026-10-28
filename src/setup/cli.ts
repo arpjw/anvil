@@ -3,6 +3,7 @@ import { parseArgs } from 'util';
 export function parseCli(argv: string[]) {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, strict: true, options: {
     help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'V' },
+    'no-isolate': { type: 'boolean' }, 'allow-commands': { type: 'boolean' },
     headless: { type: 'boolean' }, 'dry-run': { type: 'boolean' }, 'no-verify': { type: 'boolean' },
     commands: { type: 'boolean' }, continue: { type: 'boolean' }, 'no-open': { type: 'boolean' },
     json: { type: 'boolean' }, 'stream-json': { type: 'boolean' }, yes: { type: 'boolean', short: 'y' },
@@ -32,8 +33,10 @@ Commands:
 
 Flags:
   --model <id>         Select a model
+  --no-isolate         Edit the current checkout instead of a dedicated Git worktree
+  --allow-commands     Permit host shell commands and project checks for this run
   --dry-run           Explore and produce a plan without editing project files
-  --headless          Auto-approve and output one JSON result; progress on stderr
+  --headless          Auto-approve edits, deny shell commands unless explicitly allowed
   --stream-json       Headless mode with NDJSON events and a final result frame
   --json              JSON output for verify, history, or dry-run
   --budget <dollars>  Estimated model-usage ceiling (checked after each response)

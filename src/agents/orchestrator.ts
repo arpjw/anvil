@@ -1,4 +1,9 @@
 import OpenAI from 'openai';
+import { simpleGit } from 'simple-git';
+import { prepareWorkspace, changedWorkspaceFiles, commitWorkspace, type IsolatedWorkspace } from '../workspace/isolated.js';
+import { lockWorkspace } from '../workspace/lock.js';
+import { recoverTransaction } from '../workspace/transaction.js';
+import { executionContext, withExecutionContext, type CommandPolicy } from '../execution/context.js';
 import { shutdownLspClient } from '../lsp/client.js';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, relative, join } from 'path';
@@ -44,6 +49,9 @@ export interface OrchestratorOptions {
   noOpen?: boolean;
   autoBranch?: boolean;
   resumePlan?: Plan;
+  isolation?: 'worktree' | 'none';
+  commands?: CommandPolicy;
+  signal?: AbortSignal;
 }
 
 let activeSession: string | null = null;
@@ -51,10 +59,23 @@ let activeSession: string | null = null;
 export async function runOrchestrator(
   request: string, workdir: string, sessionId: string, options: OrchestratorOptions = {},
 ): Promise<SessionResult> {
+  return withExecutionContext({ root: resolve(workdir), commands: options.commands ?? (options.headless ? 'deny' : 'ask') },
+    () => runSession(request, workdir, sessionId, options));
+}
+
+async function runSession(request: string, workdir: string, sessionId: string, options: OrchestratorOptions): Promise<SessionResult> {
   if (activeSession) throw new Error(`Session ${activeSession} is already active in this process.`);
   activeSession = sessionId;
   uiStream.resetSession();
+  const cancel = () => uiStream.cancelSession('Session cancelled. Changes retained in the workspace.');
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  if (options.signal?.aborted) cancel();
+  registerInterruptHandler();
   workdir = resolve(workdir);
+  const sourceWorkdir = resolve(workdir);
+  let isolated: IsolatedWorkspace | undefined;
+  let unlock: (() => void) | undefined;
+  let commitHash = '';
   const config = loadConfig();
   const modelId = options.modelId ?? config.model;
   const spec = AVAILABLE_MODELS.find(m => m.id === modelId);
@@ -76,9 +97,20 @@ export async function runOrchestrator(
     if (!options.client && !apiKey) throw new Error(`${spec?.envKey ?? 'API key'} is not set for ${modelId}.`);
     const client = options.client ?? buildClient(modelId, spec!.baseURL, apiKey!);
     uiStream.push({ type: 'usage_update', usage: initSessionUsage(sessionId, modelId) });
+    uiStream.throwIfCancelled();
+    if (options.isolation !== 'none') {
+      isolated = await prepareWorkspace(sourceWorkdir, sessionId);
+      workdir = isolated.workdir;
+      branchName = isolated.branchName;
+      executionContext()!.root = workdir;
+      uiStream.push({ type: 'workspace_ready', sourceWorkdir, workdir, branchName });
+      uiStream.push({ type: 'branch_created', branchName });
+    }
+    unlock = lockWorkspace(workdir, 'session');
+    recoverTransaction(workdir);
     const ctx = await loadContext(request, workdir);
     const contextSection = [options.systemPrompt, buildContextSection(ctx),
-      options.continueConversation ? summarizeHistory(loadConversation(workdir) ?? { id: '', workdir, turns: [], createdAt: new Date(), updatedAt: new Date() }) : '',
+      options.continueConversation ? summarizeHistory(loadConversation(sourceWorkdir) ?? { id: '', workdir, turns: [], createdAt: new Date(), updatedAt: new Date() }) : '',
     ].filter(Boolean).join('\n\n');
     const cleanRequest = ctx.cleanRequest || request;
     uiStream.push({ type: 'context_loaded', filesResolved: ctx.files.length, symbolsResolved: ctx.symbols.length,
@@ -121,9 +153,8 @@ export async function runOrchestrator(
     const sessionDir = join('/tmp/anvil', sessionId);
     mkdirSync(sessionDir, { recursive: true });
     writeFileSync(join(sessionDir, 'plan.json'), JSON.stringify(plan, null, 2));
-    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ sessionId, workdir, request, modelId }, null, 2));
-    if (!options.headless) registerInterruptHandler(sessionId, workdir);
-    if (options.autoBranch ?? config.autoBranch) {
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ sessionId, workdir: sourceWorkdir, executionWorkdir: workdir, isolation: options.isolation ?? 'worktree', request, modelId }, null, 2));
+    if (!isolated && (options.autoBranch ?? config.autoBranch) && await simpleGit(workdir).checkIsRepo()) {
       workflow = advance(workflow, WorkflowPhase.BRANCHING);
       // Fail before execution if an isolated branch cannot be prepared.
       branchName = await createSessionBranch(workdir, sessionId);
@@ -151,9 +182,14 @@ export async function runOrchestrator(
       }
     }
 
+    uiStream.throwIfCancelled();
+    if (isolated) for (const path of await changedWorkspaceFiles(workdir)) files.add(join(workdir, path));
     // Commit after all fix rounds so the branch contains the exact verified files.
     workflow = advance(workflow, WorkflowPhase.COMMITTING);
-    if (branchName) {
+    if (isolated && (options.autoBranch ?? config.autoBranch)) {
+      commitHash = await commitWorkspace(workdir, sessionId);
+      if (commitHash) uiStream.push({ type: 'session_committed', commitHash, paths: [...files] });
+    } else if (!isolated && branchName) {
       for (const filepath of files) {
         const message = `feat: update ${relative(workdir, filepath)}`;
         const commitHash = await commitFile(workdir, filepath, message);
@@ -182,6 +218,11 @@ export async function runOrchestrator(
     return result;
   } catch (err) {
     const message = (err as Error).message;
+    if (uiStream.signal.aborted) {
+      result = makeResult('aborted', message, 'skipped', []);
+      uiStream.push({ type: 'session_cancelled', summary: result.summary });
+      return result;
+    }
     result = makeResult('failed', message, 'skipped', [message]);
     uiStream.push({ type: 'session_failed', message });
     throw err;
@@ -189,13 +230,19 @@ export async function runOrchestrator(
     uiStream.off('event', capture);
     await shutdownLspClient().catch(() => {});
     resetInterruptHandler();
+    options.signal?.removeEventListener('abort', cancel);
+    if (isolated && result) {
+      try { for (const path of await changedWorkspaceFiles(workdir)) files.add(join(workdir, path)); } catch { /* retain captured changes if Git is unavailable */ }
+      result.filesModified = [...files];
+    }
+    unlock?.();
     try {
       if (result) {
-        persistSessionResult(workdir, result);
-        appendTurn(workdir, { role: 'user', content: request, timestamp: new Date(), sessionId });
-        appendTurn(workdir, { role: 'assistant', content: result.summary, timestamp: new Date(), sessionId, filesModified: [...files] });
+        persistSessionResult(sourceWorkdir, result);
+        appendTurn(sourceWorkdir, { role: 'user', content: request, timestamp: new Date(), sessionId });
+        appendTurn(sourceWorkdir, { role: 'assistant', content: result.summary, timestamp: new Date(), sessionId, filesModified: [...files] });
       }
-      persistSessionUsage(workdir, sessionId);
+      persistSessionUsage(sourceWorkdir, sessionId);
     } finally {
       clearSessionUsage(sessionId);
       activeSession = null;
@@ -203,7 +250,7 @@ export async function runOrchestrator(
   }
 
   function makeResult(status: SessionResult['status'], text: string, verification: SessionResult['verification'], failures: string[]): SessionResult {
-    return { sessionId, workdir, request, modelId, status, summary: text, verification, failures,
+    return { sessionId, workdir, sourceWorkdir, isolation: isolated ? 'worktree' : 'none', baseCommit: isolated?.baseCommit, commitHash, request, modelId, status, summary: text, verification, failures,
       filesModified: [...files], branchName, startedAt, completedAt: new Date().toISOString() };
   }
 }
@@ -211,6 +258,7 @@ export async function runOrchestrator(
 export async function runDryRun(request: string, workdir: string, sessionId: string, options: OrchestratorOptions = {}): Promise<Plan> {
   if (activeSession) throw new Error(`Session ${activeSession} is already active in this process.`);
   activeSession = sessionId;
+  uiStream.resetSession();
   const config = loadConfig();
   const modelId = options.modelId ?? config.model;
   const spec = AVAILABLE_MODELS.find(m => m.id === modelId);

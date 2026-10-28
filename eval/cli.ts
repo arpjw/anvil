@@ -18,7 +18,7 @@ function parseArgs(argv: string[]): CliArgs {
     outputDir: './eval-results',
     resume: false,
     modelId: 'claude-sonnet-4-6',
-    concurrency: 3,
+    concurrency: 1,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -46,7 +46,7 @@ function parseArgs(argv: string[]): CliArgs {
   --output <dir>      per-task JSON output dir (default: ./eval-results)
   --resume            skip tasks that already have a result file
   --model <id>        model to use (default: claude-sonnet-4-6)
-  --concurrency <n>   tasks in flight at once (default: 3)`);
+  --concurrency <n>   tasks in flight at once (default: 1; one agent session per process)`);
         process.exit(0);
     }
   }

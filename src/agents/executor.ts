@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { resolve } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
+import { parseEdits } from '../workspace/transaction.js';
 import type { Plan } from './planner.js';
 
 export interface ExecutorReport {
@@ -15,7 +16,8 @@ const EXECUTOR_SYSTEM = `You are the Executor subagent for Anvil. You implement 
 Execution rules:
 - Follow the steps in the plan in order
 - Use read_file to read the current file content before writing it
-- Use write_file to apply changes; the shadow workspace validates TypeScript before committing
+- Use write_files for related multi-file edits and deletions. Supply all dependent files together so validation sees the complete change.
+- Use write_file for independent single-file changes; the shadow workspace validates TypeScript before committing
 - If write_file returns TypeScript errors, fix them and retry (you have up to 3 attempts per file)
 - If write_file returns an ESCALATION message, note it and continue to the next step
 - Only read files that are listed in the plan's filesToModify or filesToCreate
@@ -24,7 +26,7 @@ Execution rules:
 - When all steps are complete, call done`;
 
 // Executor tools: read_file, write_file, run_command, run_tests, done
-const executorTools = ['read_file', 'write_file', 'run_command', 'run_tests', 'done']
+const executorTools = ['read_file', 'write_file', 'write_files', 'run_command', 'run_tests', 'done']
   .map(name => toolDefinitions.find(t => t.function.name === name)!)
   .filter(Boolean);
 
@@ -75,8 +77,29 @@ export async function runExecutor(
       }
     }
 
+    if (name === 'write_files') {
+      try {
+        const edits = parseEdits(args.edits);
+        if (hasRestriction && edits.some(e => !allowedSet.has(resolve(workdir, e.path)))) {
+          const result = 'Access denied: a batch file is not in the approved plan.';
+          for (const edit of edits) unresolved.set(resolve(workdir, edit.path), result);
+          return { result };
+        }
+      } catch (err) {
+        const result = `Invalid batch: ${(err as Error).message}`;
+        unresolved.set('invalid-batch', result);
+        return { result };
+      }
+    }
+
     const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
 
+    if (name === 'write_files') {
+      if (result.startsWith('Applied batch ') || result.startsWith('User rejected ')) {
+        unresolved.delete('invalid-batch');
+        for (const edit of parseEdits(args.edits)) unresolved.delete(resolve(workdir, edit.path));
+      } else for (const edit of parseEdits(args.edits)) unresolved.set(resolve(workdir, edit.path), result);
+    }
     if (name === 'write_file') {
       const key = resolve(workdir, String(args.path));
       if (result.startsWith('Wrote ') || result.startsWith('User rejected ')) unresolved.delete(key);

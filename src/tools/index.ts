@@ -1,4 +1,6 @@
 import type OpenAI from 'openai';
+import { applyTransaction } from '../workspace/transaction.js';
+import { workspacePath } from './workspace_path.js';
 import { readFile } from './read_file.js';
 import { listFiles } from './list_files.js';
 import { textSearch } from './text_search.js';
@@ -14,6 +16,18 @@ import { semanticSearch } from './semantic_search.js';
 import { uiStream } from '../ui/stream.js';
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'write_files',
+      description: 'Apply a related multi-file change as one validated transaction. Stage all files together before validation, review, and application. Use this for renames, interface changes, or other edits that break types when applied one at a time. null content deletes a file.',
+      parameters: { type: 'object', properties: {
+        edits: { type: 'array', minItems: 1, maxItems: 100, items: {
+          type: 'object', properties: { path: { type: 'string' }, content: { type: ['string', 'null'] } }, required: ['path', 'content'], additionalProperties: false,
+        } },
+      }, required: ['edits'] },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -278,7 +292,20 @@ export async function executeTool(
   sessionId: string,
   ignorePatterns?: string[],
 ): Promise<string> {
+  // All model-selected paths stay in the execution workspace, including reads
+  // and working-directory overrides. Explicitly approved shell text is trusted.
+  try {
+    args = { ...args };
+    for (const key of ['path', 'file', 'filepath', 'workdir']) {
+      if (typeof args[key] === 'string') args[key] = workspacePath(workdir, args[key] as string, ['list_files', 'text_search', 'ast_search'].includes(name) || key === 'workdir');
+    }
+  } catch (err) { return `Access denied: ${(err as Error).message}`; }
   switch (name) {
+    case 'write_files':
+      try {
+        const result = await applyTransaction(workdir, sessionId, args.edits);
+        return result.status === 'rejected' ? 'User rejected batch. No files changed.' : `Applied batch ${result.id}: ${result.paths.join(', ') || 'no changes'}`;
+      } catch (err) { return `Error applying batch: ${(err as Error).message}`; }
     case 'read_file':
       return readFile(
         args.path as string,
