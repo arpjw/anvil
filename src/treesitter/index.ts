@@ -1,40 +1,27 @@
 import { createRequire } from 'module';
 import { readFileSync } from 'fs';
 import { extname } from 'path';
+import type Parser from 'tree-sitter';
+
+type Language = Parameters<Parser['setLanguage']>[0];
 
 const require = createRequire(import.meta.url);
 
-// Lazy-loaded to avoid startup cost
-let _Parser: any = null;
-let _tsGrammar: any = null;
-let _tsxGrammar: any = null;
-let _pyGrammar: any = null;
+// Native modules load only when AST retrieval is requested.
+let ParserClass: typeof Parser | undefined;
+const grammars = new Map<string, Language>();
 
-function getParser(grammar: any): any {
-  if (!_Parser) {
-    _Parser = require('tree-sitter');
-    const ts = require('tree-sitter-typescript');
-    _tsGrammar = ts.typescript;
-    _tsxGrammar = ts.tsx;
-    _pyGrammar = require('tree-sitter-python');
+function grammarForExt(ext: string): Language | null {
+  if (!['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py'].includes(ext)) return null;
+  ParserClass ??= require('tree-sitter') as typeof Parser;
+  if (!grammars.has(ext)) {
+    if (ext === '.py') grammars.set(ext, require('tree-sitter-python') as Language);
+    else {
+      const ts = require('tree-sitter-typescript') as { typescript: Language; tsx: Language };
+      grammars.set(ext, ext === '.tsx' || ext === '.jsx' ? ts.tsx : ts.typescript);
+    }
   }
-  const parser = new _Parser();
-  parser.setLanguage(grammar);
-  return parser;
-}
-
-function grammarForExt(ext: string): any | null {
-  if (!_Parser) {
-    // Force init
-    getParser(null);
-  }
-  switch (ext) {
-    case '.ts': return _tsGrammar;
-    case '.tsx': return _tsxGrammar;
-    case '.js': case '.jsx': case '.mjs': case '.cjs': return _tsGrammar;
-    case '.py': return _pyGrammar;
-    default: return null;
-  }
+  return grammars.get(ext)!;
 }
 
 export type QueryType = 'functions' | 'classes' | 'imports' | 'interfaces' | 'types';
@@ -47,7 +34,7 @@ export interface AstNode {
 }
 
 export interface ParsedFile {
-  tree: any;
+  tree: Parser.Tree;
   content: string;
 }
 
@@ -63,27 +50,29 @@ export function parseFile(filePath: string): ParsedFile | null {
     return null;
   }
 
-  const parser = getParser(grammar);
+  const parser = new ParserClass!();
+  parser.setLanguage(grammar);
   const tree = parser.parse(content);
-  return { tree, content };
+  return tree ? { tree, content } : null;
 }
 
-export function queryNodes(tree: any, queryType: QueryType): AstNode[] {
+export function queryNodes(tree: Parser.Tree, queryType: QueryType): AstNode[] {
   const results: AstNode[] = [];
   visitNode(tree.rootNode, queryType, results);
   return results;
 }
 
-function visitNode(node: any, queryType: QueryType, out: AstNode[]): void {
+function visitNode(node: Parser.SyntaxNode, queryType: QueryType, out: AstNode[]): void {
   const match = matchNode(node, queryType);
   if (match) out.push(match);
 
   for (let i = 0; i < node.childCount; i++) {
-    visitNode(node.child(i), queryType, out);
+    const child = node.child(i);
+    if (child) visitNode(child, queryType, out);
   }
 }
 
-function matchNode(node: any, queryType: QueryType): AstNode | null {
+function matchNode(node: Parser.SyntaxNode, queryType: QueryType): AstNode | null {
   const type: string = node.type;
 
   switch (queryType) {
@@ -137,7 +126,7 @@ function matchNode(node: any, queryType: QueryType): AstNode | null {
   }
 }
 
-function namedNode(node: any, kind: string): AstNode | null {
+function namedNode(node: Parser.SyntaxNode, kind: string): AstNode | null {
   const nameNode = node.childForFieldName('name');
   if (!nameNode) return null;
   return {
@@ -148,10 +137,10 @@ function namedNode(node: any, kind: string): AstNode | null {
   };
 }
 
-function findArrowFunction(declNode: any): AstNode | null {
+function findArrowFunction(declNode: Parser.SyntaxNode): AstNode | null {
   for (let i = 0; i < declNode.childCount; i++) {
     const child = declNode.child(i);
-    if (child.type !== 'variable_declarator') continue;
+    if (child?.type !== 'variable_declarator') continue;
     const value = child.childForFieldName('value');
     if (!value) continue;
     if (value.type === 'arrow_function' || value.type === 'function') {
@@ -168,14 +157,14 @@ function findArrowFunction(declNode: any): AstNode | null {
   return null;
 }
 
-function importNode(node: any): AstNode {
+function importNode(node: Parser.SyntaxNode): AstNode {
   const sourceNode = node.childForFieldName('source');
   const source = sourceNode ? sourceNode.text.replace(/['"]/g, '') : '?';
   // Extract what's being imported from the import clause
   let clauseText = '';
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
-    if (child.type === 'import_clause') {
+    if (child?.type === 'import_clause') {
       clauseText = child.text;
       break;
     }

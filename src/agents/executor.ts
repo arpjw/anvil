@@ -3,10 +3,10 @@ import { resolve } from 'path';
 import { toolDefinitions, executeTool } from '../tools/index.js';
 import { runStreamingLoop } from './loop.js';
 import type { Plan } from './planner.js';
-import { uiStream } from '../ui/stream.js';
 
 export interface ExecutorReport {
   success: boolean;
+  summary: string;
   escalations: string[];
 }
 
@@ -61,31 +61,36 @@ export async function runExecutor(
     { role: 'user', content: userContent },
   ];
 
+  const unresolved = new Map<string, string>();
   const escalations: string[] = [];
 
-  await runStreamingLoop(effectiveClient, effectiveModelId, messages, executorTools, async (name, args) => {
-    if (name === 'read_file' && hasRestriction) {
+  const outcome = await runStreamingLoop(effectiveClient, effectiveModelId, messages, executorTools, async (name, args) => {
+    if ((name === 'read_file' || name === 'write_file') && hasRestriction) {
       const abs = resolve(workdir, args.path as string);
       if (!allowedSet.has(abs)) {
-        return {
-          result: `Access denied: "${args.path as string}" is not in the approved plan's file list. ` +
-            `Allowed files: ${[...allowedSet].join(', ')}`,
-        };
+        const result = `Access denied: "${args.path as string}" is not in the approved plan's file list. ` +
+          `Allowed files: ${[...allowedSet].join(', ')}`;
+        if (name === 'write_file') unresolved.set(abs, result);
+        return { result };
       }
     }
 
     const result = await executeTool(name, args, workdir, sessionId, ignorePatterns);
 
-    if (result.startsWith('ESCALATION:')) {
-      escalations.push(result);
+    if (name === 'write_file') {
+      const key = resolve(workdir, String(args.path));
+      if (result.startsWith('Wrote ') || result.startsWith('User rejected ')) unresolved.delete(key);
+      else unresolved.set(key, result);
     }
 
     return { result };
   }, 20, {
-    suppressDoneEvent: !!extraContext,
+    suppressDoneEvent: true,
     sessionId,
     budgetCapUSD: budgetCapUSD ?? null,
   });
 
-  return { success: escalations.length === 0, escalations };
+  escalations.push(...unresolved.values());
+  if (!outcome.completed) escalations.push('Executor stopped before confirming completion.');
+  return { success: outcome.completed && escalations.length === 0, summary: outcome.summary, escalations };
 }

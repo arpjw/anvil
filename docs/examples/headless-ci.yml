@@ -1,0 +1,41 @@
+# Copy into .github/workflows/ only when you want manually triggered AI runs.
+# Configure the provider secret and review model costs before running.
+name: Anvil manual task
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Task for Anvil
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  task:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Run task
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANVIL_REQUEST: ${{ inputs.request }}
+        run: |
+          git config user.name "Anvil CI"
+          git config user.email "anvil@example.invalid"
+          node dist/index.js --headless --budget 2 "$ANVIL_REQUEST" . > result.json
+      - name: Save result and reviewable patch
+        if: always()
+        run: git diff "${{ github.sha }}" -- . ':!result.json' > changes.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anvil-result
+          path: |
+            result.json
+            changes.patch

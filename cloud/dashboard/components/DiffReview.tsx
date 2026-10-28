@@ -12,6 +12,9 @@ export interface DiffReviewProps {
   prOpening?: boolean;
   prUrl?: string | null;
   prError?: string | null;
+  initialDiffs?: Diff[];
+  readOnly?: boolean;
+  sessionComplete?: boolean;
 }
 
 interface FileEntry {
@@ -24,13 +27,13 @@ export function DiffReview({
   onOpenPr,
   prOpening,
   prUrl,
-  prError,
+  prError, initialDiffs, readOnly, sessionComplete,
 }: DiffReviewProps) {
   const key = `/sessions/${sessionId}/diffs`;
-  const { data: diffs, isLoading } = useSWR<Diff[]>(
-    key,
+  const { data: diffs, isLoading, error } = useSWR<Diff[]>(
+    readOnly ? null : key,
     () => getDiffs(sessionId),
-    { refreshInterval: 5_000 },
+    { refreshInterval: readOnly || sessionComplete ? 0 : 5_000, fallbackData: initialDiffs },
   );
   const { mutate } = useSWRConfig();
 
@@ -47,15 +50,17 @@ export function DiffReview({
   }, [diffs]);
 
   const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
 
   async function setStatus(diffId: string, status: DiffStatus) {
     setPending((p) => ({ ...p, [diffId]: true }));
+    setActionError(null);
     try {
       if (status === 'approved') await approveDiff(sessionId, diffId);
       else await rejectDiff(sessionId, diffId);
       await mutate(key);
-    } finally {
+    } catch (err) { setActionError((err as Error).message); } finally {
       setPending((p) => {
         const next = { ...p };
         delete next[diffId];
@@ -69,7 +74,7 @@ export function DiffReview({
     try {
       await approveAllDiffs(sessionId);
       await mutate(key);
-    } finally {
+    } catch (err) { setActionError((err as Error).message); } finally {
       setApprovingAll(false);
     }
   }
@@ -86,7 +91,7 @@ export function DiffReview({
     return { pending, approved, rejected };
   }, [diffs]);
 
-  const canOpenPr = summary.approved > 0 && summary.pending === 0 && !prUrl;
+  const canOpenPr = !!sessionComplete && summary.approved > 0 && summary.pending === 0 && !prUrl;
 
   if (isLoading && !diffs) {
     return (
@@ -95,6 +100,8 @@ export function DiffReview({
       </div>
     );
   }
+
+  if (error && !diffs) return <div className="action-error p-5" role="alert">Failed to load changes. <button className="button-secondary" onClick={() => void mutate(key)}>Retry</button></div>;
 
   if (!diffs || diffs.length === 0) {
     return (
@@ -106,7 +113,8 @@ export function DiffReview({
 
   return (
     <div className="flex flex-col h-full">
-      <Toolbar
+      {actionError && <p className="action-error p-3" role="alert">{actionError}</p>}
+      {!readOnly && <Toolbar
         summary={summary}
         onApproveAll={approveEverything}
         approvingAll={approvingAll}
@@ -115,13 +123,13 @@ export function DiffReview({
         prOpening={prOpening}
         prUrl={prUrl}
         prError={prError}
-      />
+      />}
       <div className="flex-1 overflow-y-auto">
         {entries.map((entry) => (
           <FileDiffCard
             key={entry.diff.id}
             entry={entry}
-            pending={pending[entry.diff.id] ?? false}
+            pending={readOnly || pending[entry.diff.id] || false}
             onApprove={() => setStatus(entry.diff.id, 'approved')}
             onReject={() => setStatus(entry.diff.id, 'rejected')}
           />
@@ -152,7 +160,7 @@ function Toolbar({
 }) {
   return (
     <div
-      className="flex items-center justify-between px-5 h-11 shrink-0"
+      className="flex flex-wrap gap-3 items-center justify-between px-5 py-3 shrink-0"
       style={{ borderBottom: '1px solid #1f1f1f', backgroundColor: '#0a0a0a' }}
     >
       <div className="flex items-baseline gap-3 text-xs font-mono">
@@ -229,13 +237,15 @@ function FileDiffCard({
       }}
     >
       <div
-        className="flex items-center gap-3 px-3 py-2"
+        className="flex flex-wrap items-center gap-3 px-3 py-2"
         style={{
           borderBottom: '1px solid #1f1f1f',
           backgroundColor: '#111111',
         }}
       >
         <button
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${diff.filepath}`}
+          aria-expanded={expanded}
           onClick={() => setExpanded((e) => !e)}
           className="text-xs font-mono"
           style={{ color: '#6b7280' }}

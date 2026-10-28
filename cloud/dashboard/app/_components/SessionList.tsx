@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { getRepos, getSessions } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -103,6 +104,8 @@ function OnboardingStep({ n, children }: { n: number; children: React.ReactNode 
 }
 
 export function SessionList() {
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState('all');
   const { data: sessions, error, isLoading } = useSWR<Session[]>(
     '/sessions',
     getSessions,
@@ -113,6 +116,14 @@ export function SessionList() {
     repos !== undefined &&
     repos.length === 0 &&
     (sessions?.length ?? 0) === 0;
+  const filtered = useMemo(() => (sessions ?? []).filter(session => {
+    const matches = `${session.request} ${session.repoFullName ?? ''} ${session.branch}`.toLowerCase().includes(query.toLowerCase());
+    const active = ['queued', 'provisioning', 'running'].includes(session.status);
+    return matches && (view === 'all' || view === 'active' && active || session.status === view);
+  }), [sessions, query, view]);
+  const activeCount = sessions?.filter(s => ['queued', 'provisioning', 'running'].includes(s.status)).length ?? 0;
+  const reviewCount = sessions?.filter(s => s.status === 'reviewing').length ?? 0;
+  const completedCount = sessions?.filter(s => s.status === 'complete').length ?? 0;
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -130,6 +141,12 @@ export function SessionList() {
         </Link>
       </div>
 
+      {sessions && sessions.length > 0 && <>
+        <p className="text-sm" style={{ color: '#9696a2' }}>Your agent work, from first plan to final review.</p>
+        <div className="session-metrics"><div><span>In progress</span><strong>{activeCount}</strong></div><div><span>Needs your review</span><strong style={{ color: '#e8b66a' }}>{reviewCount}</strong></div><div><span>Completed</span><strong>{completedCount}</strong></div></div>
+        <div className="session-search"><input aria-label="Search sessions" placeholder="Search requests, repositories, or branches…" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="Filter sessions" value={view} onChange={e => setView(e.target.value)}><option value="all">All sessions</option><option value="active">In progress</option><option value="reviewing">Needs review</option><option value="complete">Completed</option><option value="failed">Failed</option><option value="aborted">Stopped</option></select></div>
+        <p className="text-xs" style={{ color: '#787884' }}>{filtered.length} of {sessions.length} sessions</p>
+      </>}
       {needsOnboarding && <Onboarding />}
 
       {error && (
@@ -172,9 +189,10 @@ export function SessionList() {
         </div>
       )}
 
+      {sessions && sessions.length > 0 && filtered.length === 0 && <div className="workspace-empty"><h2>No matching sessions</h2><button className="button-secondary" onClick={() => { setQuery(''); setView('all'); }}>Clear filters</button></div>}
       {sessions && sessions.length > 0 && (
         <ul className="space-y-2 mt-6">
-          {sessions.map((s) => (
+          {filtered.map((s) => (
             <li key={s.id}>
               <Link
                 href={`/sessions/${s.id}`}

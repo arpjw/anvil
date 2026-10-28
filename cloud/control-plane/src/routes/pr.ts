@@ -23,6 +23,8 @@ export async function openPr({
   githubToken,
   deps,
 }: OpenPrParams): Promise<OpenPrResult> {
+  if (session.status !== 'complete') throw new HttpError(409, 'session_incomplete', 'Finish execution and verification before opening a PR.');
+  if (session.prUrl) return { prUrl: session.prUrl, session };
   if (approvedDiffs.length === 0) {
     throw new HttpError(
       400,

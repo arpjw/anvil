@@ -1,9 +1,8 @@
 import { execSync } from 'child_process';
-import { existsSync, accessSync, constants, statfsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { statfsSync, mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { detectLanguages, getLspRequirements, checkLspInstalled } from './lsp.js';
-import { getApiKey } from './config.js';
+import { AVAILABLE_MODELS, loadConfig } from './config.js';
+import { findServerBin } from '../lsp/client.js';
 
 interface Check {
   name: string;
@@ -16,26 +15,24 @@ interface Check {
 function nodeVersion(): Check {
   const ver = process.versions.node;
   const [major] = ver.split('.').map(Number);
-  const pass = major >= 18;
+  const pass = major >= 22;
   return {
-    name: 'Node.js >= 18',
+    name: 'Node.js >= 22',
     required: true,
     pass,
     detail: `v${ver}`,
-    fix: pass ? undefined : 'Install Node.js 18+ from https://nodejs.org',
+    fix: pass ? undefined : 'Install Node.js 22 LTS from https://nodejs.org',
   };
 }
 
-function apiKey(): Check {
-  const key = getApiKey();
-  const pass = !!key;
-  return {
-    name: 'ANTHROPIC_API_KEY',
-    required: true,
-    pass,
-    detail: pass ? (process.env.ANTHROPIC_API_KEY ? 'set via env' : 'set via ~/.anvil/config.json') : 'not set',
-    fix: pass ? undefined : 'Set ANTHROPIC_API_KEY or run: anvil config set apiKey <your-key>',
-  };
+function apiKey(modelId?: string): Check {
+  const config = loadConfig();
+  const model = AVAILABLE_MODELS.find(m => m.id === (modelId ?? config.model));
+  if (!model) return { name: 'Model', required: true, pass: false, detail: 'unknown model', fix: 'Select a supported model with --model.' };
+  const key = process.env[model.envKey] ?? (model.envKey === 'ANTHROPIC_API_KEY' ? config.apiKey : null);
+  return { name: model.envKey, required: true, pass: !!key,
+    detail: key ? `configured for ${model.id}` : `not set for ${model.id}`,
+    fix: key ? undefined : `Set ${model.envKey} before running this model.` };
 }
 
 function ripgrep(): Check {
@@ -65,12 +62,13 @@ async function lspChecks(workdir: string): Promise<Check[]> {
   }
   const reqs = getLspRequirements(langs);
   return reqs.map(req => {
-    const pass = checkLspInstalled(req);
+    const supported = req.server === 'typescript-language-server';
+    const pass = supported ? !!findServerBin(workdir) : checkLspInstalled(req, workdir);
     return {
       name: `LSP: ${req.server}`,
-      required: true,
+      required: supported,
       pass,
-      detail: pass ? 'installed' : 'not found',
+      detail: supported ? pass ? 'installed (project, bundled, or PATH)' : 'not found' : 'optional; per-file validation is currently TypeScript/JavaScript only',
       fix: pass ? undefined : `Install: ${req.installCmd}`,
     };
   });
@@ -82,12 +80,13 @@ function shadowWorkspace(): Check {
   let detail = '/tmp/anvil writable';
   let fix: string | undefined;
   try {
-    const { execSync: ex } = { execSync };
-    ex(`mkdir -p ${tmpDir} && touch ${tmpDir}/.probe && rm ${tmpDir}/.probe`, { stdio: 'ignore' });
+    mkdirSync(tmpDir, { recursive: true });
+    const probe = mkdtempSync(`${tmpDir}/probe-`);
+    rmSync(probe, { recursive: true });
   } catch {
     pass = false;
     detail = '/tmp/anvil not writable';
-    fix = 'Run: sudo chmod 777 /tmp or check disk space';
+    fix = 'Check temporary-directory ownership and available disk space';
   }
   return { name: 'Shadow workspace (/tmp/anvil)', required: true, pass, detail, fix };
 }
@@ -142,12 +141,12 @@ function bunCheck(): Check {
   };
 }
 
-export async function runDoctor(workdir: string = process.cwd()): Promise<number> {
+export async function runDoctor(workdir: string = process.cwd(), modelId?: string): Promise<number> {
   console.log('\nAnvil doctor\n');
 
   const checks: Check[] = [
     nodeVersion(),
-    apiKey(),
+    apiKey(modelId),
     ripgrep(),
     ...(await lspChecks(workdir)),
     shadowWorkspace(),

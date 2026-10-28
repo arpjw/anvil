@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { readFileSync, existsSync } from 'fs';
-import { resolve, join, dirname } from 'path';
+import { resolve, join, dirname, delimiter, extname } from 'path';
+import { createRequire } from 'module';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,14 +53,15 @@ interface RawLspDiagnostic {
 
 export class LspClient {
   private proc: ChildProcess | null = null;
-  private buffer = '';
+  private buffer = Buffer.alloc(0);
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private openedDocs = new Set<string>();
   private _workdir = '';
   private _ready = false;
   private diagnosticsMap = new Map<string, LspDiagnostic[]>();
-  private diagnosticsListeners = new Map<string, Array<(diags: LspDiagnostic[]) => void>>();
+  private diagnosticsListeners = new Map<string, Array<(diags: LspDiagnostic[], version?: number) => void>>();
+  private diagnosticFailures = new Set<(err: Error) => void>();
   private docVersions = new Map<string, number>();
 
   get ready(): boolean { return this._ready && this.proc !== null; }
@@ -82,17 +84,34 @@ export class LspClient {
     });
 
     this.proc.stdout!.on('data', (chunk: Buffer) => {
-      this.buffer += chunk.toString('utf-8');
+      this.buffer = Buffer.concat([this.buffer, chunk]);
       this.flush();
     });
 
-    this.proc.on('exit', () => {
+    const fail = (err: Error): void => {
       this._ready = false;
       this.proc = null;
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(err);
+      }
+      this.pending.clear();
+      for (const reject of [...this.diagnosticFailures]) reject(err);
+      this.openedDocs.clear();
+      this.docVersions.clear();
+    };
+    this.proc.on('error', fail);
+    this.proc.on('exit', (code, signal) => {
+      fail(new Error(`Language server exited (${signal ?? code ?? 'unknown'}).`));
     });
 
-    await this.doInitialize(workdir);
-    this._ready = true;
+    try {
+      await this.doInitialize(workdir);
+      this._ready = true;
+    } catch (err) {
+      this.proc?.kill();
+      throw err;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -107,16 +126,11 @@ export class LspClient {
     let text = '';
     try { text = readFileSync(filePath, 'utf-8'); } catch { return; }
 
-    const ext = filePath.split('.').pop() ?? '';
-    const languageId =
-      ext === 'py' ? 'python' :
-      (ext === 'ts' || ext === 'tsx') ? 'typescript' :
-      'javascript';
-
     this.notify('textDocument/didOpen', {
-      textDocument: { uri, languageId, version: 1, text },
+      textDocument: { uri, languageId: languageId(filePath), version: 1, text },
     });
     this.openedDocs.add(uri);
+    this.docVersions.set(uri, 1);
   }
 
   async getDefinition(filePath: string, line: number, char: number): Promise<LspLocation[]> {
@@ -147,7 +161,7 @@ export class LspClient {
       ]);
       this.notify('exit', null);
     } catch { /* ignore */ }
-    this.proc.kill('SIGTERM');
+    this.proc?.kill('SIGTERM');
     this.proc = null;
     this._ready = false;
   }
@@ -155,36 +169,24 @@ export class LspClient {
   // Send proposed content to the LSP and collect the resulting diagnostics.
   // Does NOT write to disk. Returns only error-severity items by default.
   async checkContent(filePath: string, newContent: string, timeoutMs = 8000): Promise<LspDiagnostic[]> {
-    if (!this.ready) return [];
+    if (!this.ready) throw new Error('Language server is not ready; edit was not validated.');
     const uri = pathToFileURL(filePath).toString();
-
-    if (!this.openedDocs.has(uri)) {
-      // File may not exist on disk yet — open with a placeholder so the LSP
-      // registers the document, then we'll overwrite via didChange below.
-      const exists = (() => { try { readFileSync(filePath, 'utf-8'); return true; } catch { return false; } })();
-      if (exists) {
-        this.openDocument(filePath);
-      } else {
-        const ext = filePath.split('.').pop() ?? '';
-        const languageId = ext === 'py' ? 'python' : (ext === 'ts' || ext === 'tsx') ? 'typescript' : 'javascript';
-        this.notify('textDocument/didOpen', {
-          textDocument: { uri, languageId, version: 1, text: '' },
-        });
-        this.openedDocs.add(uri);
-        this.docVersions.set(uri, 1);
-      }
-      // Let the LSP settle before sending the change.
-      await new Promise(r => setTimeout(r, 50));
-    }
-
-    const version = (this.docVersions.get(uri) ?? 1) + 1;
+    const version = (this.docVersions.get(uri) ?? 0) + 1;
+    // Subscribe before sending: a fast server may publish diagnostics immediately.
+    const diagnostics = this.waitForDiagnosticsSettle(uri, version, timeoutMs);
     this.docVersions.set(uri, version);
-    this.notify('textDocument/didChange', {
-      textDocument: { uri, version },
-      contentChanges: [{ text: newContent }],
-    });
-
-    return this.waitForDiagnosticsSettle(uri, timeoutMs);
+    if (!this.openedDocs.has(uri)) {
+      this.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: languageId(filePath), version, text: newContent },
+      });
+      this.openedDocs.add(uri);
+    } else {
+      this.notify('textDocument/didChange', {
+        textDocument: { uri, version },
+        contentChanges: [{ text: newContent }],
+      });
+    }
+    return diagnostics;
   }
 
   // Reset the LSP's in-memory view of a file back to what is on disk.
@@ -193,7 +195,12 @@ export class LspClient {
     const uri = pathToFileURL(filePath).toString();
     if (!this.openedDocs.has(uri)) return;
     let text = '';
-    try { text = readFileSync(filePath, 'utf-8'); } catch { return; }
+    try { text = readFileSync(filePath, 'utf-8'); } catch {
+      this.notify('textDocument/didClose', { textDocument: { uri } });
+      this.openedDocs.delete(uri);
+      this.docVersions.delete(uri);
+      return;
+    }
     const version = (this.docVersions.get(uri) ?? 1) + 1;
     this.docVersions.set(uri, version);
     this.notify('textDocument/didChange', {
@@ -206,14 +213,14 @@ export class LspClient {
   // Diagnostics settle helper
   // -------------------------------------------------------------------------
 
-  private waitForDiagnosticsSettle(uri: string, timeoutMs: number): Promise<LspDiagnostic[]> {
-    return new Promise(resolve => {
+  private waitForDiagnosticsSettle(uri: string, version: number, timeoutMs: number): Promise<LspDiagnostic[]> {
+    return new Promise((resolve, reject) => {
       let latest: LspDiagnostic[] = [];
       let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
       const globalTimer = setTimeout(() => {
         cleanup();
-        resolve(latest);
+        reject(new Error(`No settled diagnostics for ${fileURLToPath(uri)} after ${timeoutMs}ms; edit was not validated.`));
       }, timeoutMs);
 
       const settle = () => {
@@ -222,18 +229,24 @@ export class LspClient {
         resolve(latest);
       };
 
-      const handler = (diags: LspDiagnostic[]) => {
+      const handler = (diags: LspDiagnostic[], publishedVersion?: number) => {
+        if (publishedVersion !== undefined && publishedVersion !== version) return;
         latest = diags;
         if (settleTimer) clearTimeout(settleTimer);
         settleTimer = setTimeout(settle, 400);
       };
 
       const cleanup = () => {
+        clearTimeout(globalTimer);
         if (settleTimer) clearTimeout(settleTimer);
+        this.diagnosticFailures.delete(fail);
         const ls = this.diagnosticsListeners.get(uri) ?? [];
         const idx = ls.indexOf(handler);
         if (idx >= 0) ls.splice(idx, 1);
       };
+
+      const fail = (err: Error): void => { cleanup(); reject(err); };
+      this.diagnosticFailures.add(fail);
 
       const ls = this.diagnosticsListeners.get(uri) ?? [];
       ls.push(handler);
@@ -243,11 +256,11 @@ export class LspClient {
 
   private handleNotification(msg: JsonRpcMessage): void {
     if (msg.method !== 'textDocument/publishDiagnostics') return;
-    const p = msg.params as { uri: string; diagnostics: RawLspDiagnostic[] };
+    const p = msg.params as { uri: string; version?: number; diagnostics: RawLspDiagnostic[] };
     const diags = (p.diagnostics ?? []).map(d => this.normalizeDiagnostic(d, p.uri));
     this.diagnosticsMap.set(p.uri, diags);
     const ls = this.diagnosticsListeners.get(p.uri);
-    if (ls) for (const fn of ls) fn(diags);
+    if (ls) for (const fn of [...ls]) fn(diags, p.version);
   }
 
   private normalizeDiagnostic(raw: RawLspDiagnostic, uri: string): LspDiagnostic {
@@ -281,7 +294,7 @@ export class LspClient {
           publishDiagnostics: {
             relatedInformation: true,
             tagSupport: { valueSet: [1, 2] },
-            versionSupport: false,
+            versionSupport: true,
             codeDescriptionSupport: true,
           },
           definition: { dynamicRegistration: false, linkSupport: false },
@@ -303,7 +316,7 @@ export class LspClient {
       const sep = this.buffer.indexOf('\r\n\r\n');
       if (sep === -1) break;
 
-      const header = this.buffer.slice(0, sep);
+      const header = this.buffer.subarray(0, sep).toString('ascii');
       const m = header.match(/Content-Length:\s*(\d+)/i);
       if (!m) { this.buffer = this.buffer.slice(sep + 4); continue; }
 
@@ -311,12 +324,17 @@ export class LspClient {
       const bodyStart = sep + 4;
       if (this.buffer.length < bodyStart + len) break;
 
-      const body = this.buffer.slice(bodyStart, bodyStart + len);
+      const body = this.buffer.subarray(bodyStart, bodyStart + len).toString('utf-8');
       this.buffer = this.buffer.slice(bodyStart + len);
 
       try {
         const msg = JSON.parse(body) as JsonRpcMessage;
-        if (msg.id != null) this.dispatch(msg);
+        if (msg.id != null && msg.method) {
+          // Server-initiated requests must receive a response to avoid deadlock.
+          const params = msg.params as { items?: unknown[] } | undefined;
+          this.send({ id: msg.id, result: msg.method === 'workspace/configuration'
+            ? (params?.items ?? []).map(() => ({})) : null });
+        } else if (msg.id != null) this.dispatch(msg);
         else this.handleNotification(msg);
       } catch { /* malformed — drop */ }
     }
@@ -342,6 +360,7 @@ export class LspClient {
   }
 
   private request(method: string, params: unknown, timeoutMs = 10_000): Promise<unknown> {
+    if (!this.proc?.stdin?.writable) return Promise.reject(new Error('Language server is disconnected.'));
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const timer = setTimeout(() => {
@@ -368,7 +387,7 @@ function normalizeLocations(raw: unknown): LspLocation[] {
   return [raw as LspLocation];
 }
 
-function findServerBin(workdir: string): string | null {
+export function findServerBin(workdir: string): string | null {
   // 1. project-local node_modules/.bin (works without global install)
   const local = join(workdir, 'node_modules', '.bin', 'typescript-language-server');
   if (existsSync(local)) return local;
@@ -383,10 +402,25 @@ function findServerBin(workdir: string): string | null {
     dir = parent;
   }
 
-  // 3. PATH (global install)
-  // Resolve via shell — execa is async so we avoid it here; return null and
-  // let the caller suggest npm install -g
+  // 3. Anvil's own runtime dependency (including global npm installations).
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require.resolve('typescript-language-server/package.json');
+    const bin = join(dirname(pkg), 'lib', 'cli.mjs');
+    if (existsSync(bin)) return bin;
+  } catch { /* fall back to PATH */ }
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    const candidate = join(dir, 'typescript-language-server');
+    if (existsSync(candidate)) return candidate;
+  }
   return null;
+}
+
+function languageId(filePath: string): string {
+  const ext = extname(filePath);
+  if (ext === '.tsx') return 'typescriptreact';
+  if (ext === '.jsx') return 'javascriptreact';
+  return ['.ts', '.mts', '.cts'].includes(ext) ? 'typescript' : 'javascript';
 }
 
 // ---------------------------------------------------------------------------
@@ -411,4 +445,10 @@ export function formatLocation(loc: LspLocation, workdir: string): string {
   const filePath = fileURLToPath(loc.uri);
   const rel = filePath.startsWith(workdir + '/') ? filePath.slice(workdir.length + 1) : filePath;
   return `${rel}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`;
+}
+
+export async function shutdownLspClient(): Promise<void> {
+  const client = _singleton;
+  _singleton = null;
+  await client?.shutdown();
 }

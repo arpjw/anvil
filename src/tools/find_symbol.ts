@@ -1,5 +1,5 @@
 import { resolve, join } from 'path';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { getLspClient, formatLocation } from '../lsp/client.js';
 
 const TS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs']);

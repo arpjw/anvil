@@ -1,6 +1,7 @@
 import { simpleGit, type DefaultLogFields } from 'simple-git';
-import { mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { mkdirSync, writeFileSync, readFileSync, realpathSync } from 'fs';
+import { join, relative } from 'path';
+import { workspacePath } from '../tools/workspace_path.js';
 
 export interface GitContext {
   branch: string;
@@ -27,77 +28,82 @@ export async function getGitContext(workdir: string): Promise<GitContext> {
   };
 }
 
+export interface SessionMetadata {
+  sessionId: string;
+  originalBranch: string;
+  branchName: string;
+  baseCommit: string;
+  createdAt: string;
+}
+
+export function getSessionMetadata(workdir: string, sessionId: string): SessionMetadata {
+  if (!/^[a-zA-Z0-9-]{8,}$/.test(sessionId)) throw new Error('Invalid session id.');
+  const path = join(workdir, '.anvil', `session-${sessionId.slice(0, 8)}.json`);
+  const meta = JSON.parse(readFileSync(path, 'utf-8')) as SessionMetadata;
+  if (!meta.sessionId.startsWith(sessionId) || !meta.branchName.startsWith('anvil/session-')) {
+    throw new Error('Session metadata does not match the requested session.');
+  }
+  return meta;
+}
+
 export async function createSessionBranch(workdir: string, sessionId: string): Promise<string> {
   const git = simpleGit(workdir);
-  const originalBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-
+  const current = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+  let previous: SessionMetadata | undefined;
+  try { previous = getSessionMetadata(workdir, sessionId); } catch { /* new session */ }
+  if (previous) {
+    if (current !== previous.branchName) throw new Error(`Resume on ${previous.branchName}; current branch is ${current}.`);
+    return previous.branchName;
+  }
+  const status = await git.status();
+  if (status.files.some(f => f.index !== '?' && f.working_dir !== '?')) {
+    throw new Error('Commit or stash tracked changes before starting an automatically branched session.');
+  }
+  const baseCommit = (await git.revparse(['HEAD'])).trim();
+  const originalBranch = current === 'HEAD' ? baseCommit : current;
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const branchName = `anvil/session-${sessionId.slice(0, 8)}-${dateStr}`;
-
   await git.checkoutLocalBranch(branchName);
-
-  // Store session metadata so rollback can find the original branch.
   const metaDir = join(workdir, '.anvil');
   mkdirSync(metaDir, { recursive: true });
   const metaPath = join(metaDir, `session-${sessionId.slice(0, 8)}.json`);
-  writeFileSync(
-    metaPath,
-    JSON.stringify({ sessionId, originalBranch, branchName, createdAt: new Date().toISOString() }, null, 2),
-  );
-
-  // Commit the metadata file as the first commit on the session branch.
-  await git.add(metaPath);
-  await git.commit(`chore: initialize anvil session ${sessionId.slice(0, 8)}`);
-
+  writeFileSync(metaPath, JSON.stringify({ sessionId, originalBranch, branchName, baseCommit,
+    createdAt: new Date().toISOString() }, null, 2));
+  await commitFile(workdir, metaPath, `chore: initialize anvil session ${sessionId.slice(0, 8)}`);
   return branchName;
 }
 
 export async function commitFile(workdir: string, filepath: string, message: string): Promise<string> {
   const git = simpleGit(workdir);
-  await git.add(filepath);
-  const result = await git.commit(message, { '--allow-empty': null });
-  return result.commit;
+  const rel = relative(realpathSync(workdir), workspacePath(workdir, filepath));
+  if ((await git.raw(['diff', '--cached', '--name-only', '--', rel])).trim() !== rel) {
+    await git.raw(['add', '--', rel]);
+  } else if ((await git.raw(['diff', '--name-only', '--', rel])).trim()) {
+    await git.raw(['add', '--', rel]);
+  }
+  if (!(await git.raw(['diff', '--cached', '--name-only', '--', rel])).trim()) return '';
+  // --only keeps unrelated staged changes out of the session commit.
+  const result = await git.raw(['commit', '--only', '-m', message, '--', rel]);
+  void result;
+  return (await git.revparse(['HEAD'])).trim();
 }
 
 export async function rollbackSession(workdir: string, sessionId: string): Promise<string[]> {
   const git = simpleGit(workdir);
-  const shortId = sessionId.slice(0, 8);
-  const metaPath = join(workdir, '.anvil', `session-${shortId}.json`);
-
-  let meta: { originalBranch: string; branchName: string };
-  try {
-    meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
-  } catch {
-    throw new Error(`No session metadata found for session ${shortId}. Expected at ${metaPath}`);
+  const meta = getSessionMetadata(workdir, sessionId);
+  const current = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+  if (current !== meta.branchName) throw new Error(`Rollback must run on ${meta.branchName}.`);
+  const status = await git.status();
+  if (status.files.some(f => f.index !== '?' && f.working_dir !== '?')) {
+    throw new Error('Rollback refused: uncommitted changes would be lost. Commit or stash them first.');
   }
-
-  const { originalBranch, branchName } = meta;
-
-  // Collect files changed in the session branch before reverting.
-  let filesRestored: string[] = [];
-  try {
-    const diffSummary = await git.diffSummary([`${originalBranch}...${branchName}`]);
-    filesRestored = diffSummary.files.map((f: { file: string }) => f.file);
-  } catch {
-    // Not fatal — diff may fail if the session branch has no unique commits.
-  }
-
-  const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-
-  if (currentBranch === branchName) {
-    // Hard-reset the session branch back to the merge-base with the original branch.
-    // This restores the working tree to the pre-session state before we checkout out.
-    try {
-      const mergeBase = (await git.raw(['merge-base', originalBranch, 'HEAD'])).trim();
-      if (mergeBase) await git.reset(['--hard', mergeBase]);
-    } catch {}
-    await git.checkout(originalBranch);
-  }
-
-  // Delete the session branch (force — it is intentionally unmerged).
-  await git.deleteLocalBranch(branchName, true);
-
-  return filesRestored;
+  const base = meta.baseCommit || (await git.raw(['merge-base', meta.originalBranch, meta.branchName])).trim();
+  const raw = await git.raw(['diff', '--name-only', '-z', base, meta.branchName]);
+  const files = raw.split('\0').filter(f => f && !f.startsWith('.anvil/'));
+  // Preserve the session branch as a recovery point. Checkout itself refuses
+  // untracked-file collisions; there is no hard reset or forced branch delete.
+  await git.checkout(meta.originalBranch);
+  return files;
 }
 
 export async function generatePRDescription(sessionId: string, workdir: string): Promise<string> {
@@ -105,9 +111,14 @@ export async function generatePRDescription(sessionId: string, workdir: string):
   const shortId = sessionId.slice(0, 8);
 
   // Determine the base branch.
-  let baseBranch = 'main';
-  try { await git.revparse(['main']); }
-  catch { try { await git.revparse(['master']); baseBranch = 'master'; } catch {} }
+  let baseBranch: string;
+  try {
+    const meta = getSessionMetadata(workdir, sessionId);
+    baseBranch = meta.baseCommit || meta.originalBranch;
+  } catch {
+    baseBranch = 'main';
+    try { await git.revparse(['main']); } catch { baseBranch = 'master'; }
+  }
 
   let commits: Array<{ hash: string; message: string; date: string; author_name: string }> = [];
   let changedFiles: string[] = [];

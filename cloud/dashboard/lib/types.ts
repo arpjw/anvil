@@ -62,6 +62,10 @@ export interface Diff {
 }
 
 export interface Plan {
+  goal?: string;
+  context?: string;
+  steps?: string[];
+  verificationCriteria?: string[];
   intent?: string;
   approach?: string;
   filesToRead?: string[];
@@ -73,6 +77,7 @@ export interface Plan {
 }
 
 export interface UIEvent {
+  id?: string;
   type: string;
   payload?: unknown;
   timestamp?: number;

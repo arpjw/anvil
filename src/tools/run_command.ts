@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { resolve } from 'path';
+import { StringDecoder } from 'string_decoder';
 import { uiStream } from '../ui/stream.js';
 
 const BLOCKED_PATTERNS: RegExp[] = [
@@ -40,23 +41,42 @@ export async function runCommand(
 
   const absWorkdir = resolve(workdir);
 
-  const stdoutLines: string[] = [];
-  const stderrLines: string[] = [];
-
-  // Streaming buffers — flush on newline, emit a command_output event per line
-  // so TUIs / cloud dashboards can render progress before the process exits.
+  const captured: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
   const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
+  const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+  let retained = 0;
+  let truncated = false;
+  let streamed = 0;
+  const emit = (line: string, which: 'stdout' | 'stderr'): void => {
+    if (streamed >= 64_000) return;
+    const bounded = line.slice(0, 64_000 - streamed);
+    streamed += bounded.length + 1;
+    uiStream.push({ type: 'command_output', command, line: bounded, stream: which });
+  };
   const consume = (chunk: Buffer | string, which: 'stdout' | 'stderr'): void => {
-    buffers[which] += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
-    while (true) {
-      const idx = buffers[which].indexOf('\n');
-      if (idx === -1) break;
-      const line = buffers[which].slice(0, idx);
-      buffers[which] = buffers[which].slice(idx + 1);
-      if (which === 'stdout') stdoutLines.push(line);
-      else stderrLines.push(line);
-      uiStream.push({ type: 'command_output', command, line, stream: which });
+    const text = typeof chunk === 'string' ? chunk : decoders[which].write(chunk);
+    const keep = text.slice(0, Math.max(0, MAX_COMBINED - retained));
+    captured[which] += keep;
+    retained += keep.length;
+    truncated ||= keep.length < text.length;
+    if (streamed >= 64_000) return;
+    buffers[which] += text.slice(0, 64_000 - streamed);
+    while (buffers[which].length) {
+      const newline = buffers[which].indexOf('\n');
+      if (newline < 0 && buffers[which].length < 2048) break;
+      const end = newline >= 0 ? Math.min(newline, 2048) : 2048;
+      emit(buffers[which].slice(0, end), which);
+      buffers[which] = buffers[which].slice(end + (newline === end ? 1 : 0));
     }
+  };
+  const output = (): { stdout: string; stderr: string } => {
+    for (const which of ['stdout', 'stderr'] as const) {
+      consume(decoders[which].end(), which);
+      if (buffers[which]) emit(buffers[which], which);
+      buffers[which] = '';
+    }
+    if (truncated) captured.stderr += '\n[output truncated]';
+    return captured;
   };
 
   try {
@@ -72,43 +92,16 @@ export async function runCommand(
 
     const proc = await subprocess;
 
-    // Flush any partial trailing lines that never saw a newline.
-    if (buffers.stdout) {
-      stdoutLines.push(buffers.stdout);
-      uiStream.push({ type: 'command_output', command, line: buffers.stdout, stream: 'stdout' });
-    }
-    if (buffers.stderr) {
-      stderrLines.push(buffers.stderr);
-      uiStream.push({ type: 'command_output', command, line: buffers.stderr, stream: 'stderr' });
-    }
-
-    let stdout = stdoutLines.join('\n');
-    let stderr = stderrLines.join('\n');
-
-    const combined = stdout.length + stderr.length;
-    if (combined > MAX_COMBINED) {
-      const excess = combined - MAX_COMBINED;
-      const note = `\n[...${excess} chars truncated]`;
-      if (stdout.length > MAX_COMBINED) {
-        stdout = stdout.slice(0, MAX_COMBINED - note.length) + note;
-        stderr = '';
-      } else {
-        const budget = MAX_COMBINED - stdout.length - note.length;
-        stderr = stderr.slice(0, Math.max(0, budget)) + note;
-      }
-    }
-
     return {
-      stdout,
-      stderr,
-      exitCode: proc.exitCode ?? 0,
-      timedOut: (proc as unknown as { timedOut?: boolean }).timedOut ?? false,
+      ...output(),
+      exitCode: proc.exitCode ?? (proc.failed ? 1 : 0),
+      timedOut: proc.timedOut ?? false,
     };
   } catch (err) {
     const e = err as { timedOut?: boolean; message?: string };
     return {
-      stdout: stdoutLines.join('\n'),
-      stderr: (stderrLines.length > 0 ? stderrLines.join('\n') + '\n' : '') + (e.message ?? String(err)),
+      ...output(),
+      stderr: (captured.stderr + '\n' + (e.message ?? String(err))).slice(-MAX_COMBINED),
       exitCode: 1,
       timedOut: e.timedOut ?? false,
     };

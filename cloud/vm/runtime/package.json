@@ -10,12 +10,14 @@
   },
   "dependencies": {
     "ws": "^8.18.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "anvil-agent": "file:../../.."
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "ts-node": "^10.9.2",
     "@types/ws": "^8.5.13",
     "@types/node": "^22.10.0"
-  }
+  },
+  "type": "module"
 }

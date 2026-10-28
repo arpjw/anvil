@@ -47,8 +47,10 @@ export async function runStreamingLoop(
   executeToolFn: ToolExecutorFn,
   maxIterations = 20,
   options: LoopOptions = {},
-): Promise<void> {
+): Promise<{ completed: boolean; summary: string }> {
   let iterations = 0;
+  let completed = false;
+  let summary = '';
 
   outer: while (iterations < maxIterations) {
     iterations++;
@@ -129,10 +131,22 @@ export async function runStreamingLoop(
 
     for (const tc of toolCalls) {
       let args: Record<string, unknown> = {};
-      try { args = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* malformed */ }
+      try {
+        const parsed: unknown = JSON.parse(tc.arguments);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected an object');
+        args = parsed as Record<string, unknown>;
+      } catch {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: 'Invalid tool arguments: provide a JSON object.' });
+        continue;
+      }
+      if (!tools.some(tool => tool.function.name === tc.name)) {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: `Unavailable tool: ${tc.name}` });
+        continue;
+      }
 
       if (tc.name === 'done') {
-        const summary = (args.summary as string) ?? '';
+        summary = (args.summary as string) ?? '';
+        completed = true;
         if (!options.suppressDoneEvent) {
           uiStream.push({ type: 'done', summary });
         }
@@ -147,13 +161,14 @@ export async function runStreamingLoop(
 
       messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
 
-      if (done) break outer;
+      if (done) { completed = true; break outer; }
     }
   }
 
-  if (iterations >= maxIterations) {
+  if (!completed && iterations >= maxIterations) {
     uiStream.push({ type: 'error', message: 'Reached max iterations limit.' });
   }
+  return { completed, summary };
 }
 
 export function describeArgs(raw: string): string {

@@ -58,6 +58,7 @@ export interface Repository {
   ): Promise<SessionWithRepoName[]>;
   findSessionById(id: string): Promise<SessionDetail | null>;
   createSession(input: NewSession): Promise<Session>;
+  updateSessionPlan(id: string, plan: unknown): Promise<void>;
   updateSessionStatus(id: string, status: SessionStatus): Promise<Session>;
   updateSessionVm(
     id: string,
@@ -302,6 +303,10 @@ export function createPgRepository(
       const [row] = await db.insert(sessions).values(input).returning();
       if (!row) throw new Error('failed to create session');
       return row;
+    },
+
+    async updateSessionPlan(id, plan) {
+      await db.update(sessions).set({ planJson: plan }).where(eq(sessions.id, id));
     },
 
     async updateSessionStatus(id, status) {
@@ -611,6 +616,12 @@ export function createPgRepository(
     },
 
     async createDiff(input) {
+      const [existing] = await db.select().from(diffs).where(and(eq(diffs.sessionId, input.sessionId), eq(diffs.filepath, input.filepath))).limit(1);
+      if (existing) {
+        const [updated] = await db.update(diffs).set({ newContent: input.newContent, status: 'pending' }).where(eq(diffs.id, existing.id)).returning();
+        if (!updated) throw new Error('failed to update diff');
+        return updated;
+      }
       const [row] = await db
         .insert(diffs)
         .values({

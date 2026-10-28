@@ -10,6 +10,7 @@ import {
 
 export interface VerificationResult {
   passed: boolean;
+  skipped?: boolean;
   rounds: number;
   remainingFailures: string[];
 }
@@ -46,6 +47,7 @@ export async function runVerification(
   ignorePatterns?: string[],
   client?: OpenAI,
   modelId?: string,
+  budgetCapUSD?: number | null,
 ): Promise<VerificationResult> {
   uiStream.push({ type: 'verification_start' });
 
@@ -54,6 +56,10 @@ export async function runVerification(
     let result = await validationEngine.validate({ workdir, sessionId });
 
     if (result.passed) {
+      if (result.checks.every(c => c.status === 'skipped')) {
+        uiStream.push({ type: 'verification_skipped' });
+        return { passed: true, skipped: true, rounds: 0, remainingFailures: [] };
+      }
       uiStream.push({ type: 'verification_pass', rounds: 0 });
       return { passed: true, rounds: 0, remainingFailures: [] };
     }
@@ -74,7 +80,7 @@ export async function runVerification(
         fixPlan.plan,
       ].join('\n');
 
-      await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction, client, modelId);
+      await runExecutor(plan, workdir, sessionId, ignorePatterns, fixInstruction, client, modelId, budgetCapUSD);
 
       result = await validationEngine.validate({ workdir, sessionId });
 

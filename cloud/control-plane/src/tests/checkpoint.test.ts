@@ -97,7 +97,7 @@ describe('POST /sessions/:id/resume', () => {
     expect(body.error.code).toBe('no_checkpoint');
   });
 
-  test('resumes a failed session with checkpoint back into provisioning', async () => {
+  test('retries in a fresh session and preserves the failed session', async () => {
     const { token, sessionId } = await seedFailedSession();
     await h.repo.checkpointSession(sessionId, {
       phase: 'VERIFYING',
@@ -109,10 +109,14 @@ describe('POST /sessions/:id/resume', () => {
     });
     expect(res.status).toBe(200);
     const body = await readJson<{
-      session: { status: string };
-      resumedFromPhase: string;
+      session: { id: string; status: string };
+      retryOf: string;
+      recovery: string;
     }>(res);
-    expect(body.session.status).toBe('provisioning');
-    expect(body.resumedFromPhase).toBe('VERIFYING');
+    expect(body.session.status).toBe('queued');
+    expect(body.session.id).not.toBe(sessionId);
+    expect(body.retryOf).toBe(sessionId);
+    expect(body.recovery).toBe('fresh_checkout');
+    expect((await h.repo.findSessionById(sessionId))?.status).toBe('failed');
   });
 });

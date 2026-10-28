@@ -8,7 +8,7 @@ import {
   UserButton,
 } from '@clerk/nextjs';
 
-export function Nav() {
+export function Nav({ configured = true }: { configured?: boolean }) {
   return (
     <header
       className="fixed top-0 inset-x-0 z-40 h-[52px] flex items-center px-6"
@@ -26,7 +26,8 @@ export function Nav() {
       </Link>
       <div className="flex-1" />
       <div className="flex items-center gap-3">
-        <SignedOut>
+        {!configured && <Link href="/demo" className="button-secondary">Explore demo ↗</Link>}
+        {configured && <><SignedOut>
           <SignInButton mode="modal">
             <button
               className="px-3 py-1.5 text-sm rounded-md transition-colors"
@@ -62,7 +63,7 @@ export function Nav() {
               },
             }}
           />
-        </SignedIn>
+        </SignedIn></>}
       </div>
     </header>
   );

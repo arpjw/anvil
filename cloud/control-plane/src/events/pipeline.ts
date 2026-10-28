@@ -15,6 +15,7 @@ export interface UIEvent {
 }
 
 export interface PublishedMessage {
+  id?: string;
   type: string;
   payload: unknown;
   timestamp: number;
@@ -44,8 +45,15 @@ function nextStatusFor(eventType: string): SessionStatus | null {
       return 'reviewing';
     case 'done':
       return 'complete';
-    case 'error':
+    case 'session_failed':
+    case 'session_error':
       return 'failed';
+    case 'session_cancelled':
+    case 'aborted':
+      return 'aborted';
+    case 'plan_approved':
+    case 'plan_revision_requested':
+      return 'running';
     default:
       return null;
   }
@@ -82,17 +90,26 @@ export async function processEvent(
   // Ephemeral event types are broadcast to SSE clients but not persisted to
   // the events table — a long test run can emit thousands of command_output
   // lines and none of them are worth an audit-trail row.
+  let persistedId: string | undefined;
+  let timestamp = Date.now();
   const EPHEMERAL_TYPES = new Set(['command_output', 'usage_update']);
   if (!EPHEMERAL_TYPES.has(event.type)) {
     try {
-      await repo.createEvent(sessionId, event.type, normalizedPayload);
+      const persisted = await repo.createEvent(sessionId, event.type, normalizedPayload);
+      persistedId = persisted.id;
+      timestamp = persisted.createdAt.getTime();
     } catch (err) {
       logger.warn({ sessionId, eventType: event.type, err }, 'failed to persist event');
     }
   }
 
+  if (event.type === 'plan_ready' && normalizedPayload && typeof normalizedPayload === 'object') {
+    const plan = (normalizedPayload as { plan?: unknown }).plan ?? normalizedPayload;
+    await repo.updateSessionPlan(sessionId, plan);
+  }
+
   // Session-level checkpoint: mirror phase_transition into sessions.checkpoint_*
-  // so a failed session can be resumed from the last-completed phase.
+  // for progress inspection. This is not a VM filesystem recovery snapshot.
   if (event.type === 'phase_transition' && normalizedPayload && typeof normalizedPayload === 'object') {
     const phaseTo = (normalizedPayload as { to?: unknown }).to;
     if (typeof phaseTo === 'string') {
@@ -108,9 +125,10 @@ export async function processEvent(
   }
 
   await publishToChannel(redis, sessionId, {
+    id: persistedId,
     type: event.type,
     payload: normalizedPayload,
-    timestamp: Date.now(),
+    timestamp,
   });
 
   const next = nextStatusFor(event.type);

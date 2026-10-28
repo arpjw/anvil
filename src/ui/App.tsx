@@ -20,7 +20,7 @@ let _uid = 0;
 const uid = () => ++_uid;
 
 type ToolItem    = { kind: 'tool';    id: number; name: string; args: string; result?: string };
-type ShadowItem  = { kind: 'shadow';  id: number; file: string; attempt: number; maxAttempts: number; outcome?: 'committed' | 'retry' | 'escalated'; errorCount?: number };
+type ShadowItem  = { kind: 'shadow';  id: number; file: string; attempt: number; maxAttempts: number; outcome?: 'committed' | 'rejected' | 'retry' | 'escalated'; errorCount?: number };
 type TextItem    = { kind: 'text';    id: number; text: string; color?: string };
 type PhaseItem   = { kind: 'phase';   id: number; label: string };
 type CommandItem = {
@@ -171,7 +171,7 @@ function LeftPanel({
 
 // ── Item renderer ─────────────────────────────────────────────────────────────
 
-function renderItem(item: DisplayItem): JSX.Element {
+function renderItem(item: DisplayItem): React.JSX.Element {
   switch (item.kind) {
     case 'tool':
       return (
@@ -412,8 +412,17 @@ export function App({ request, workdir, sessionId, modelLabel }: AppProps) {
         setItems(prev => [...prev, { kind: 'text', id: uid(), text: `✓ ${event.summary}`, color: 'green' }]);
         break;
 
-      case 'error':
+      case 'session_cancelled':
+        setPhase('done');
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: event.summary, color: 'yellow' }]);
+        break;
+
+      case 'session_failed':
         setPhase('error');
+        setItems(prev => [...prev, { kind: 'text', id: uid(), text: event.message, color: 'red' }]);
+        break;
+
+      case 'error':
         setItems(prev => [...prev, { kind: 'text', id: uid(), text: `✗ ${event.message}`, color: 'red' }]);
         break;
 

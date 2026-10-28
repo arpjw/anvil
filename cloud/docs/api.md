@@ -103,3 +103,15 @@ All error responses are shaped `{ "error": { "code": string, "message": string, 
 | 500 | `internal_error` |
 | 502 | `stripe_error`, `pr_failed` |
 | 503 | `billing_disabled` |
+
+
+## Session lifecycle additions
+
+- `POST /sessions/:id/revise`: body `{ "feedback": "..." }`, 1 to 4000 nonblank characters. Requires ownership, `reviewing` state, and a connected runtime. Returns the updated session.
+- `POST /sessions/:id/approve`: now returns 409 if the runtime is disconnected; it does not silently advance the session.
+- `POST /sessions/:id/reject`: cancels the pending plan and records `aborted`.
+- `POST /sessions/:id/resume`: for a failed session with a phase checkpoint, creates a fresh session on the original source branch. Returns `{ session, retryOf, recovery: "fresh_checkout" }`. It does not restore the old VM filesystem. Clients should navigate to the returned session ID.
+- `POST /sessions`: returns 503 when the selected provider key is unavailable and 429 when the process-local provisioning limit is reached.
+- `POST /sessions/:id/pr`: requires a completed session; an existing PR is returned without creating another.
+
+Persistent SSE events include stable `id` and millisecond `timestamp` fields. `error` is a recoverable activity event. `session_error` and `session_failed` are terminal failures; cancellation is `aborted`. Replay is bounded, and command output is ephemeral, so exported activity is not a complete audit log.

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { runCommand } from '../../tools/run_command.js';
+import { runCommand, type RunCommandResult } from '../../tools/run_command.js';
 import { runTests, type RunTestsResult } from '../../tools/run_tests.js';
 
 export type ValidationPhase = 'typecheck' | 'lint' | 'test' | 'custom';
@@ -19,7 +19,16 @@ export interface ValidateInput {
   sessionId?: string;
 }
 
+export interface ValidationCheck {
+  phase: ValidationPhase;
+  status: 'passed' | 'failed' | 'skipped';
+  durationMs: number;
+  commands: string[];
+  reason?: string;
+}
+
 export interface ValidateOutput {
+  checks: ValidationCheck[];
   passed: boolean;
   errors: ValidationError[];
   warnings: ValidationError[];
@@ -42,6 +51,7 @@ export interface ValidationEngineOptions {
   skipLint?: boolean;
   skipTests?: boolean;
   skipCustom?: boolean;
+  commandRunner?: typeof runCommand;
 }
 
 export class ValidationEngine {
@@ -68,30 +78,39 @@ export class ValidationEngine {
     const errors: ValidationError[] = [];
     const warnings: ValidationError[] = [];
 
-    // 1. Type check
-    const typeErrs = await runTypeCheck(input.workdir);
-    errors.push(...typeErrs);
-
-    // 2. Lint
-    if (!this.options.skipLint) {
-      const { errs, warns } = await runLint(input.workdir);
-      errors.push(...errs);
-      warnings.push(...warns);
-    }
-
-    // 3. Tests
-    if (!this.options.skipTests) {
-      const testErrs = await runTestsPhase(input.workdir);
-      errors.push(...testErrs);
-    }
-
-    // 4. Custom rules from .anvil/rules.md
-    if (!this.options.skipCustom) {
-      const customErrs = await runCustomRules(input.workdir);
-      errors.push(...customErrs);
-    }
-
-    return { passed: errors.length === 0, errors, warnings };
+    const checks: ValidationCheck[] = [];
+    const run = this.options.commandRunner ?? runCommand;
+    const phase = async (
+      name: ValidationPhase, skipped: boolean,
+      action: (runner: typeof runCommand) => Promise<void>,
+    ): Promise<void> => {
+      const started = Date.now();
+      const before = errors.length;
+      const commands: string[] = [];
+      const runner: typeof runCommand = async (...args) => {
+        commands.push(args[0]);
+        return run(...args);
+      };
+      if (!skipped) {
+        try { await action(runner); }
+        catch (err) { errors.push({ phase: name, file: '', line: 0, message: (err as Error).message, fixable: false }); }
+      }
+      checks.push({ phase: name, durationMs: Date.now() - started, commands,
+        status: errors.length > before ? 'failed' : skipped || commands.length === 0 ? 'skipped' : 'passed',
+        ...(skipped ? { reason: 'Disabled by configuration' } : commands.length === 0 ? { reason: 'No check detected' } : {}),
+      });
+    };
+    await phase('typecheck', false, async run => { errors.push(...await runTypeCheck(input.workdir, run)); });
+    await phase('lint', !!this.options.skipLint, async run => {
+      const { errs, warns } = await runLint(input.workdir, run);
+      errors.push(...errs); warnings.push(...warns);
+    });
+    await phase('test', !!this.options.skipTests, async run => {
+      const result = await runTests(input.workdir, undefined, run);
+      errors.push(...testErrors(result));
+    });
+    await phase('custom', !!this.options.skipCustom, async run => { errors.push(...await runCustomRules(input.workdir, run)); });
+    return { passed: errors.length === 0, errors, warnings, checks };
   }
 
   async planFix(input: FixInput): Promise<FixOutput> {
@@ -158,51 +177,53 @@ export class ValidationEngine {
 
 // ── Phase implementations ────────────────────────────────────────────────────
 
-async function runTypeCheck(workdir: string): Promise<ValidationError[]> {
-  if (existsSync(join(workdir, 'tsconfig.json'))) {
-    const result = await runCommand('npx tsc --noEmit', workdir, 60);
+async function runTypeCheck(workdir: string, run: typeof runCommand): Promise<ValidationError[]> {
+  const script = packageScript(workdir, 'typecheck');
+  if (script || existsSync(join(workdir, 'tsconfig.json'))) {
+    const result = await run(script ? 'npm run --silent typecheck' : 'npx --no-install tsc --noEmit --pretty false', workdir, 60);
     if (result.exitCode === 0) return [];
-    return parseTscErrors(result.stdout + '\n' + result.stderr);
+    return ensureFailure(parseTscErrors(result.stdout + '\n' + result.stderr), result, 'typecheck');
   }
   if (existsSync(join(workdir, 'pyproject.toml'))) {
-    const result = await runCommand('python -m mypy .', workdir, 60);
+    const result = await run('python -m mypy .', workdir, 60);
     if (result.exitCode === 0) return [];
-    return parseMypyErrors(result.stdout + '\n' + result.stderr);
+    return ensureFailure(parseMypyErrors(result.stdout + '\n' + result.stderr), result, 'typecheck');
   }
   if (existsSync(join(workdir, 'Cargo.toml'))) {
-    const result = await runCommand('cargo check', workdir, 60);
+    const result = await run('cargo check', workdir, 60);
     if (result.exitCode === 0) return [];
-    return parseCargoErrors(result.stdout + '\n' + result.stderr);
+    return ensureFailure(parseCargoErrors(result.stdout + '\n' + result.stderr), result, 'typecheck');
   }
   return [];
 }
 
 async function runLint(
-  workdir: string,
+  workdir: string, run: typeof runCommand,
 ): Promise<{ errs: ValidationError[]; warns: ValidationError[] }> {
+  const script = packageScript(workdir, 'lint');
   // eslint
   const eslintConfigs = [
     'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs',
     '.eslintrc', '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs',
   ];
-  if (eslintConfigs.some(f => existsSync(join(workdir, f)))) {
-    const result = await runCommand('npx eslint . --format compact', workdir, 60);
-    if (result.exitCode === 0) return { errs: [], warns: [] };
-    return parseEslintCompact(result.stdout + '\n' + result.stderr);
+  if (script || eslintConfigs.some(f => existsSync(join(workdir, f)))) {
+    const result = await run(script ? 'npm run --silent lint' : 'npx --no-install eslint . --format json', workdir, 60);
+    const parsed = parseEslint(result.stdout + '\n' + result.stderr);
+    return { errs: result.exitCode === 0 ? parsed.errs : ensureFailure(parsed.errs, result, 'lint'), warns: parsed.warns };
   }
 
   // pylint / ruff (best-effort detection)
   if (existsSync(join(workdir, '.pylintrc'))) {
-    const result = await runCommand('python -m pylint .', workdir, 60);
+    const result = await run('python -m pylint .', workdir, 60);
     if (result.exitCode === 0) return { errs: [], warns: [] };
-    return parsePylint(result.stdout + '\n' + result.stderr);
+    const parsed = parsePylint(result.stdout + '\n' + result.stderr);
+    return { errs: ensureFailure(parsed.errs, result, 'lint'), warns: parsed.warns };
   }
 
   return { errs: [], warns: [] };
 }
 
-async function runTestsPhase(workdir: string): Promise<ValidationError[]> {
-  const result: RunTestsResult = await runTests(workdir);
+function testErrors(result: RunTestsResult): ValidationError[] {
   if (!result.runner) return [];
   if (result.passed) return [];
   const out: ValidationError[] = [];
@@ -228,7 +249,7 @@ async function runTestsPhase(workdir: string): Promise<ValidationError[]> {
   return out;
 }
 
-async function runCustomRules(workdir: string): Promise<ValidationError[]> {
+async function runCustomRules(workdir: string, run: typeof runCommand): Promise<ValidationError[]> {
   const rulesPath = join(workdir, '.anvil', 'rules.md');
   if (!existsSync(rulesPath)) return [];
 
@@ -248,7 +269,7 @@ async function runCustomRules(workdir: string): Promise<ValidationError[]> {
 
   const out: ValidationError[] = [];
   for (const cmd of cmds) {
-    const result = await runCommand(cmd, workdir, 60);
+    const result = await run(cmd, workdir, 60);
     if (result.exitCode === 0) continue;
     const tail = (result.stdout + '\n' + result.stderr).trim().split('\n').slice(-5).join('\n');
     out.push({
@@ -260,6 +281,30 @@ async function runCustomRules(workdir: string): Promise<ValidationError[]> {
     });
   }
   return out;
+}
+
+function packageScript(workdir: string, name: string): string | undefined {
+  try { return (JSON.parse(readFileSync(join(workdir, 'package.json'), 'utf-8')) as { scripts?: Record<string, string> }).scripts?.[name]; }
+  catch { return undefined; }
+}
+
+function ensureFailure(errors: ValidationError[], result: RunCommandResult, phase: ValidationPhase): ValidationError[] {
+  if (errors.length) return errors;
+  return [{ phase, file: '', line: 0, fixable: false,
+    message: `${result.timedOut ? 'Command timed out' : `Command failed (exit ${result.exitCode})`}: ${(result.stdout + '\n' + result.stderr).trim().slice(-2000) || 'No diagnostic output'}` }];
+}
+
+function parseEslint(output: string): { errs: ValidationError[]; warns: ValidationError[] } {
+  try {
+    const files = JSON.parse(output) as Array<{ filePath: string; messages: Array<{ severity: number; line?: number; message: string; ruleId?: string; fix?: unknown }> }>;
+    const errs: ValidationError[] = [], warns: ValidationError[] = [];
+    for (const file of files) for (const msg of file.messages) {
+      const entry: ValidationError = { phase: 'lint', file: file.filePath, line: msg.line ?? 0,
+        message: msg.ruleId ? `${msg.message} (${msg.ruleId})` : msg.message, fixable: !!msg.fix };
+      (msg.severity === 2 ? errs : warns).push(entry);
+    }
+    return { errs, warns };
+  } catch { return parseEslintCompact(output); }
 }
 
 // ── Parsers ──────────────────────────────────────────────────────────────────

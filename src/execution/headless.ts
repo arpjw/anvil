@@ -1,8 +1,10 @@
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
-import { runOrchestrator } from '../agents/orchestrator.js';
+import { runOrchestrator, type OrchestratorOptions } from '../agents/orchestrator.js';
+import { resumeSession } from './resume.js';
 import { uiStream, type UIEvent } from '../ui/stream.js';
+import type { SessionResult } from '../session/result.js';
 
 export interface HeadlessResult {
   sessionId: string;
@@ -12,120 +14,54 @@ export interface HeadlessResult {
   branchName: string;
   prDescriptionPath: string;
   verificationPassed: boolean;
+  verificationSkipped: boolean;
   remainingFailures: string[];
+  status: 'complete' | 'failed' | 'aborted';
+  summary: string;
 }
 
-export async function runHeadless(
-  request: string,
-  workdir: string,
-  noVerify = false,
-  client?: OpenAI,
-  modelId?: string,
+export interface HeadlessOptions extends OrchestratorOptions {
+  streamJson?: boolean;
+  resumeId?: string;
+}
+
+export async function runHeadless(request: string, workdir: string, noVerify?: boolean,
+  client?: OpenAI, modelId?: string, options: HeadlessOptions = {},
 ): Promise<HeadlessResult> {
-  const sessionId = randomUUID();
-  const absWorkdir = resolve(workdir);
-
-  const filesModified: string[] = [];
-  const commitHashes: string[] = [];
-  let branchName = '';
-  let prDescriptionPath = '';
-  // If noVerify, treat verification as passed by default
-  let verificationPassed = noVerify;
-  let remainingFailures: string[] = [];
-  let success = false;
-
+  const sessionId = options.resumeId ?? randomUUID();
+  const result: HeadlessResult = { sessionId, success: false, filesModified: [], commitHashes: [],
+    branchName: '', prDescriptionPath: '', verificationPassed: false, verificationSkipped: false,
+    remainingFailures: [], status: 'failed', summary: '' };
   const handleEvent = (event: UIEvent): void => {
+    if (options.streamJson) process.stdout.write(JSON.stringify({ type: 'event', sessionId, event }) + '\n');
+    else if (event.type === 'phase_transition') console.error(`[anvil] ${event.index}/${event.total} ${event.label}`);
+    else if (event.type === 'error' || event.type === 'session_failed') console.error(`[anvil] ${event.message}`);
     switch (event.type) {
-      case 'phase':
-        console.log(`[anvil] phase: ${event.phase}`);
-        break;
-
-      case 'tool_call':
-        console.log(`[anvil] ${event.name}: ${event.args.slice(0, 80)}`);
-        break;
-
-      case 'command_running':
-        console.log(`[anvil] ▶ ${event.command}`);
-        break;
-
-      case 'command_complete':
-        console.log(`[anvil] exit ${event.exitCode}: ${event.command.slice(0, 60)}`);
-        break;
-
-      case 'verification_start':
-        console.log('[anvil] verification: running type check + tests…');
-        break;
-
-      case 'verification_pass':
-        verificationPassed = true;
-        remainingFailures = [];
-        console.log(`[anvil] verification: passed${event.rounds > 0 ? ` after ${event.rounds} fix round(s)` : ''}`);
-        break;
-
-      case 'verification_fail':
-        verificationPassed = false;
-        remainingFailures = event.failures;
-        console.error('[anvil] verification: FAILED');
-        for (const f of event.failures) console.error(`  ${f}`);
-        break;
-
-      case 'file_modified':
-        if (!filesModified.includes(event.path)) filesModified.push(event.path);
-        break;
-
-      case 'file_committed':
-        commitHashes.push(event.commitHash);
-        break;
-
-      case 'branch_created':
-        branchName = event.branchName;
-        console.log(`[anvil] branch: ${event.branchName}`);
-        break;
-
-      case 'pr_description_ready':
-        prDescriptionPath = event.path;
-        break;
-
-      case 'done':
-        success = true;
-        console.log(`[anvil] done: ${event.summary}`);
-        break;
-
-      case 'error':
-        console.error(`[anvil] error: ${event.message}`);
-        break;
-
-      case 'approval_needed':
-        // Auto-approve plan in headless mode
-        setTimeout(() => uiStream.resolveApproval('y'), 0);
-        break;
-
-      case 'diff_ready':
-        // Auto-accept all hunks in headless mode (no human present)
-        setTimeout(() => {
-          const allIndices = new Set(Array.from({ length: event.hunkCount }, (_, i) => i));
-          uiStream.resolveDiff(allIndices, event.filepath, event.hunkCount);
-        }, 0);
-        break;
+      case 'file_modified': if (!result.filesModified.includes(event.path)) result.filesModified.push(event.path); break;
+      case 'file_committed': result.commitHashes.push(event.commitHash); break;
+      case 'branch_created': result.branchName = event.branchName; break;
+      case 'pr_description_ready': result.prDescriptionPath = event.path; break;
+      case 'approval_needed': uiStream.resolveApproval('y'); break;
+      case 'diff_ready': uiStream.resolveDiff(new Set(event.diff.hunks.map((_, i) => i)), event.filepath, event.hunkCount); break;
     }
   };
-
   uiStream.on('event', handleEvent);
-
   try {
-    await runOrchestrator(request, absWorkdir, sessionId, { noVerify, client, modelId });
+    const opts = { ...options, headless: true, noOpen: true, noVerify, client, modelId };
+    const session: SessionResult = options.resumeId
+      ? await resumeSession(options.resumeId, resolve(workdir), opts)
+      : await runOrchestrator(request, resolve(workdir), sessionId, opts);
+    result.status = session.status;
+    result.success = session.status === 'complete';
+    result.summary = session.summary;
+    result.verificationPassed = session.verification === 'passed';
+    result.verificationSkipped = session.verification === 'skipped';
+    result.remainingFailures = session.failures;
+  } catch (err) {
+    result.summary = (err as Error).message;
+    result.remainingFailures.push(result.summary);
   } finally {
     uiStream.off('event', handleEvent);
   }
-
-  return {
-    sessionId,
-    success,
-    filesModified,
-    commitHashes,
-    branchName,
-    prDescriptionPath,
-    verificationPassed,
-    remainingFailures,
-  };
+  return result;
 }

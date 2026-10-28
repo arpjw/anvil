@@ -70,6 +70,11 @@ export async function approveSession(id: string): Promise<Session> {
   return data.session;
 }
 
+export async function reviseSession(id: string, feedback: string): Promise<Session> {
+  const data = await request<{ session: Session }>('POST', `/sessions/${id}/revise`, { feedback });
+  return data.session;
+}
+
 export async function rejectSession(id: string): Promise<Session> {
   const data = await request<{ session: Session }>('POST', `/sessions/${id}/reject`);
   return data.session;
@@ -179,8 +184,8 @@ export async function rejectDiff(
 
 export async function approveAllDiffs(
   sessionId: string,
-): Promise<{ count: number }> {
-  return request<{ count: number }>(
+): Promise<{ approved: number }> {
+  return request<{ approved: number }>(
     'POST',
     `/sessions/${sessionId}/diffs/approve-all`,
   );
@@ -219,8 +224,8 @@ export async function getSessionCheckpoint(
 
 export async function resumeSession(
   sessionId: string,
-): Promise<{ session: Session; resumedFromPhase: string }> {
-  return request<{ session: Session; resumedFromPhase: string }>(
+): Promise<{ session: Session; retryOf: string; recovery: 'fresh_checkout' }> {
+  return request<{ session: Session; retryOf: string; recovery: 'fresh_checkout' }>(
     'POST',
     `/sessions/${sessionId}/resume`,
   );

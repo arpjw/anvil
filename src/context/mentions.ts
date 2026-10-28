@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
-import { resolve, join, basename, relative } from 'path';
+import { resolve, join, basename } from 'path';
 import { textSearch } from '../tools/text_search.js';
 import { findSymbol } from '../tools/find_symbol.js';
 

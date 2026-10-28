@@ -64,6 +64,7 @@ export async function initProject(workdir: string = process.cwd(), yes = false):
   // .anvil/rules.md
   const rulesLines = [
     '# Anvil Rules\n',
+    `Languages: ${languages.join(', ')}\n`,
     '## Off-limits directories\n',
     ...ignoreDirs.map(d => `- ${d}`),
     '',

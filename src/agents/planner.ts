@@ -96,7 +96,7 @@ When you have a complete picture of what needs to change and why, call write_pla
 
 // Planner gets all read-only tools plus the write_plan terminal tool.
 // Execution tools are executor-only.
-const PLANNER_READONLY = new Set(['write_file', 'run_command', 'run_tests']);
+const PLANNER_READONLY = new Set(['write_file', 'run_command', 'run_tests', 'done']);
 const plannerTools = [
   ...toolDefinitions.filter(t => !PLANNER_READONLY.has(t.function.name)),
   WRITE_PLAN_TOOL,

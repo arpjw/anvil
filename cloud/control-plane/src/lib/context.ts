@@ -1,4 +1,4 @@
-import type { User } from '../db/schema';
+import type { User, Session, Repo } from '../db/schema';
 import type { Repository } from '../db/repository';
 import type { RedisPublisher } from '../events/pipeline';
 import type { SSEBroadcaster } from '../events/broadcaster';
@@ -100,6 +100,10 @@ export type StripeClient = {
 
 export type AppDeps = {
   repo: Repository;
+  sessionRuntime?: {
+    apiKeyForModel: (model: string) => string | undefined;
+    start: (session: Session, repo: Repo, user: User, apiKey: string) => Promise<void>;
+  };
   verifyToken: VerifyTokenFn;
   githubClient: GithubClientFactory;
   stripe: StripeClient | null;

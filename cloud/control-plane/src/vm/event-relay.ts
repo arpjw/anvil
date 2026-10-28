@@ -1,3 +1,4 @@
+import { posix } from 'path';
 import type { AppDeps } from '../lib/context';
 import { logger } from '../lib/logger';
 import { processEvent } from '../events/pipeline';
@@ -35,12 +36,21 @@ function asFileDiffEvent(evt: UIEvent): FileDiffEventShape | null {
   if (typeof record.filepath !== 'string') return null;
   return {
     type: 'file_diff',
-    filepath: record.filepath,
+    filepath: normalizeDiffPath(record.filepath),
     originalContent:
       typeof record.originalContent === 'string' ? record.originalContent : null,
     newContent:
       typeof record.newContent === 'string' ? record.newContent : null,
   };
+}
+
+export function normalizeDiffPath(filepath: string): string {
+  const rel = filepath.startsWith('/workspace/repo/') ? filepath.slice('/workspace/repo/'.length) : filepath;
+  const normalized = posix.normalize(rel);
+  if (posix.isAbsolute(normalized) || normalized === '..' || normalized.startsWith('../') || normalized.split('/').includes('.git')) {
+    throw new Error('Diff path must be relative to the repository.');
+  }
+  return normalized;
 }
 
 function decode(data: string | ArrayBuffer | Uint8Array): string {
@@ -56,8 +66,10 @@ export function startEventRelay(
 ): void {
   const startedAt = Date.now();
 
+  let queue = Promise.resolve();
   ws.addEventListener('message', (event) => {
-    void handleMessage(sessionId, deps, decode(event.data), startedAt);
+    queue = queue.then(() => handleMessage(sessionId, deps, decode(event.data), startedAt))
+      .catch(err => { logger.error({ sessionId, err }, 'vm event processing failed'); });
   });
 
   ws.addEventListener('close', () => {
@@ -102,7 +114,7 @@ async function handleMessage(
           );
         }
       }
-      await processEvent(deps.repo, deps.redis, sessionId, evt, { startedAt });
+      await processEvent(deps.repo, deps.redis, sessionId, evt, { startedAt, deps });
       sessionPool.broadcast(sessionId, evt);
       return;
     }
@@ -112,7 +124,7 @@ async function handleMessage(
         deps.redis,
         sessionId,
         { type: 'done', payload: msg.payload },
-        { startedAt, deps, autoOpenPr: true },
+        { startedAt, deps },
       );
       sessionPool.broadcast(sessionId, {
         type: 'session_complete',
@@ -125,8 +137,8 @@ async function handleMessage(
         deps.repo,
         deps.redis,
         sessionId,
-        { type: 'error', payload: msg.payload },
-        { startedAt, deps, autoOpenPr: true },
+        { type: 'session_error', payload: msg.payload },
+        { startedAt, deps },
       );
       sessionPool.broadcast(sessionId, {
         type: 'session_error',
@@ -140,7 +152,7 @@ async function handleMessage(
         deps.redis,
         sessionId,
         { type: 'aborted', payload: null },
-        { startedAt, deps, autoOpenPr: true },
+        { startedAt, deps },
       );
       try {
         const session = await deps.repo.findSessionById(sessionId);

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
+import { readSessionResults } from './result.js';
 import { loadConversation, type ConversationTurn } from './conversation.js';
 
 const SHADOW_BASE = '/tmp/anvil';
@@ -130,7 +131,7 @@ function readPersistedUsage(
   const match = entries.find(
     (e) =>
       (e.startsWith(sessionIdOrShort) || e.startsWith(short)) &&
-      e.endsWith('.json'),
+      e.endsWith('.json') && !e.endsWith('.result.json'),
   );
   if (!match) return null;
 
@@ -202,8 +203,11 @@ export function listHistory(workdir: string): SessionRecord[] {
     ...memBySession.keys(),
   ]);
 
+  const results = readSessionResults(workdir);
+  for (const result of results) knownIds.add(shortId(result.sessionId));
   const records: SessionRecord[] = [];
   for (const sid of knownIds) {
+    const saved = results.find(r => shortId(r.sessionId) === sid);
     const turns = bySession.get(sid) ?? [];
     const mem = memBySession.get(sid);
     const firstUser = turns.find((t) => t.role === 'user');
@@ -240,14 +244,14 @@ export function listHistory(workdir: string): SessionRecord[] {
     const persisted = readPersistedUsage(workdir, fullId);
 
     records.push({
-      sessionId: sid,
-      date,
-      request,
-      filesModified,
+      sessionId: saved?.sessionId ?? turns[0]?.sessionId ?? sid,
+      date: saved ? new Date(saved.startedAt) : date,
+      request: saved?.request ?? request,
+      filesModified: saved?.filesModified ?? filesModified,
       turnCount: turns.length,
       estimatedCost: persisted?.estimatedCost,
       durationSeconds: persisted?.durationSeconds,
-      status: statusFromTurns(turns),
+      status: saved?.status ?? statusFromTurns(turns),
     });
   }
 
@@ -324,7 +328,8 @@ export function getSession(
   const turns = conv?.turns.filter((t) => shortId(t.sessionId) === short) ?? [];
   const mem = readMemoryEntries(workdir).find((m) => m.sessionId === short);
 
-  if (turns.length === 0 && !mem) return null;
+  const saved = readSessionResults(workdir).find(r => r.sessionId.startsWith(sessionId));
+  if (turns.length === 0 && !mem && !saved) return null;
 
   const firstUser = turns.find((t) => t.role === 'user');
   const assistant = turns.find((t) => t.role === 'assistant');
@@ -372,7 +377,7 @@ export function getSession(
     prPath,
     estimatedCost: persisted?.estimatedCost,
     durationSeconds: persisted?.durationSeconds,
-    status: statusFromTurns(turns),
+    status: saved?.status ?? statusFromTurns(turns),
   };
 }
 

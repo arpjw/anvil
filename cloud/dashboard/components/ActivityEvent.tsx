@@ -56,7 +56,7 @@ export function ActivityEvent({ event }: ActivityEventProps) {
       );
     }
     case 'tool_result': {
-      const preview = getStr(event.payload, 'result') || getStr(event.payload, 'output');
+      const preview = getStr(event.payload, 'preview') || getStr(event.payload, 'result') || getStr(event.payload, 'output');
       return (
         <div className={`${base} pl-8`} style={{ color: '#6b7280' }}>
           → {truncate(preview, 80)}
@@ -90,7 +90,7 @@ export function ActivityEvent({ event }: ActivityEventProps) {
       );
     }
     case 'branch_created': {
-      const branch = getStr(event.payload, 'branch') || getStr(event.payload, 'name');
+      const branch = getStr(event.payload, 'branchName') || getStr(event.payload, 'branch') || getStr(event.payload, 'name');
       return (
         <div className={base} style={{ color: '#60a5fa' }}>
           branch created: {branch}
@@ -99,7 +99,7 @@ export function ActivityEvent({ event }: ActivityEventProps) {
     }
     case 'file_committed':
     case 'file_modified': {
-      const path = getStr(event.payload, 'path') || getStr(event.payload, 'file');
+      const path = getStr(event.payload, 'filepath') || getStr(event.payload, 'path') || getStr(event.payload, 'file');
       return (
         <div className={base} style={{ color: '#4ade80' }}>
           committed: {truncate(path, 80)}
@@ -137,7 +137,8 @@ export function ActivityEvent({ event }: ActivityEventProps) {
       );
     }
     case 'error':
-    case 'session_error': {
+    case 'session_error':
+    case 'session_failed': {
       const msg = getStr(event.payload, 'message') || 'unknown error';
       return (
         <div className={base} style={{ color: '#f87171' }}>
@@ -152,6 +153,11 @@ export function ActivityEvent({ event }: ActivityEventProps) {
         </div>
       );
     }
+    case 'command_output': return <pre className={`${base} whitespace-pre-wrap break-all`} style={{ color: '#a1a1aa' }}>{getStr(event.payload, 'line')}</pre>;
+    case 'verification_pass': return <div className={base} style={{ color: '#4ade80' }}>✓ Project checks passed</div>;
+    case 'verification_fail': return <div className={base} style={{ color: '#f87171' }}>Project checks failed</div>;
+    case 'verification_skipped': return <div className={base} style={{ color: '#a1a1aa' }}>Project checks skipped</div>;
+    case 'phase_transition': return <div className={base} style={{ color: '#fbbf24' }}>◇ {getStr(event.payload, 'label')}</div>;
     default: {
       const summary = summarizeArgs(event.payload);
       return (

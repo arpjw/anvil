@@ -1,161 +1,56 @@
 'use client';
-
+import { useState } from 'react';
 import type { Plan } from '@/lib/types';
 
 export interface PlanApprovalProps {
   plan: Plan;
   onApprove: () => void;
   onReject: () => void;
+  onRevise?: (feedback: string) => void;
   resolved: boolean;
   resolution: 'approved' | 'rejected' | null;
   pending?: boolean;
+  readOnly?: boolean;
+  error?: string | null;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function PlanApproval({ plan, onApprove, onReject, onRevise, resolved, resolution, pending, readOnly, error }: PlanApprovalProps) {
+  const [revising, setRevising] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const title = plan.goal ?? plan.intent ?? 'Implementation plan';
   return (
-    <div className="mb-3">
-      <div
-        className="text-[11px] uppercase tracking-wider mb-1 font-mono"
-        style={{ color: '#6b7280' }}
-      >
-        {title}
+    <article className="plan-card">
+      <div className="plan-heading"><span className="eyebrow">{resolved ? 'Implementation plan' : 'Your review is needed'}</span><span className="mini-label">PLAN</span></div>
+      <h2>{title}</h2>
+      {(plan.context || plan.approach) && <p className="plan-context">{plan.context ?? plan.approach}</p>}
+      {!!plan.steps?.length && <ol className="plan-steps">{plan.steps.map((step, i) => <li key={i}><span>{String(i + 1).padStart(2, '0')}</span><p>{step}</p></li>)}</ol>}
+      <div className="plan-files">
+        <FileList label="Modify" files={plan.filesToModify} />
+        <FileList label="Create" files={plan.filesToCreate} />
       </div>
-      <div className="text-sm" style={{ color: '#f0f0f0' }}>
-        {children}
-      </div>
-    </div>
+      {!!plan.verificationCriteria?.length && <div className="plan-checks"><h3>Verification</h3>{plan.verificationCriteria.map((check, i) => <p key={i}><span aria-hidden>✓</span> {check}</p>)}</div>}
+      {plan.testPlan && <p className="plan-context">{plan.testPlan}</p>}
+      {!!plan.risks?.length && <details className="plan-risks"><summary>{plan.risks.length} consideration{plan.risks.length === 1 ? '' : 's'}</summary><ul>{plan.risks.map((risk, i) => <li key={i}>{risk}</li>)}</ul></details>}
+      {error && <p className="action-error" role="alert">{error}</p>}
+      {readOnly ? <p className="demo-note">Sample plan. Live session controls are disabled in this preview.</p> : resolved ? <div className="plan-resolution">{resolution === 'approved' ? '✓ Plan approved' : resolution === 'rejected' ? 'Plan rejected' : 'Plan recorded'}</div> : (
+        <div className="plan-actions">
+          {revising && <form className="revision-form" onSubmit={e => { e.preventDefault(); if (feedback.trim()) onRevise?.(feedback.trim()); }}>
+            <label htmlFor="revision-feedback">What should change?</label>
+            <textarea id="revision-feedback" maxLength={4000} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Keep the public API unchanged and add a regression test…" rows={3} disabled={pending} />
+            <div className="flex gap-2 justify-end"><button type="button" className="button-secondary" onClick={() => setRevising(false)}>Cancel</button><button className="button-primary" disabled={pending || !feedback.trim()}>Send revision</button></div>
+          </form>}
+          {!revising && <div className="flex flex-wrap gap-2 justify-end w-full">
+            <button className="button-danger" disabled={pending} onClick={onReject}>Reject</button>
+            {onRevise && <button className="button-secondary" disabled={pending} onClick={() => setRevising(true)}>Request changes</button>}
+            <button className="button-primary" disabled={pending} onClick={onApprove}>{pending ? 'Saving…' : 'Approve & run'}<span aria-hidden> ↗</span></button>
+          </div>}
+        </div>
+      )}
+    </article>
   );
 }
 
-function FileList({ files }: { files: string[] | undefined }) {
-  if (!files || files.length === 0) {
-    return <span style={{ color: '#6b7280' }}>(none)</span>;
-  }
-  return (
-    <ul className="space-y-0.5 font-mono text-[13px]">
-      {files.map((f) => (
-        <li key={f} style={{ color: '#f0f0f0' }}>
-          {f}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function RiskList({ risks }: { risks: string[] | undefined }) {
-  if (!risks || risks.length === 0) {
-    return <span style={{ color: '#6b7280' }}>(none)</span>;
-  }
-  return (
-    <ul className="space-y-1">
-      {risks.map((r, i) => (
-        <li key={i} className="text-sm">
-          {r}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function PlanApproval({
-  plan,
-  onApprove,
-  onReject,
-  resolved,
-  resolution,
-  pending,
-}: PlanApprovalProps) {
-  return (
-    <div
-      className="my-3 mx-3 rounded-md"
-      style={{
-        backgroundColor: '#111111',
-        border: resolved
-          ? '1px solid #1f1f1f'
-          : '1px solid rgba(251, 191, 36, 0.5)',
-        boxShadow: resolved ? 'none' : '0 0 0 1px rgba(251, 191, 36, 0.1)',
-      }}
-    >
-      <div
-        className="px-4 py-2 border-b text-[12px] uppercase tracking-wider font-mono"
-        style={{
-          borderColor: '#1f1f1f',
-          color: resolved ? '#6b7280' : '#fbbf24',
-        }}
-      >
-        Plan ready
-      </div>
-      <div className="px-4 py-3 max-h-[420px] overflow-y-auto">
-        {plan.intent && (
-          <Section title="Intent">
-            <p className="text-sm">{plan.intent}</p>
-          </Section>
-        )}
-        {plan.approach && (
-          <Section title="Approach">
-            <p className="text-sm whitespace-pre-wrap">{plan.approach}</p>
-          </Section>
-        )}
-        <Section title="Files to read">
-          <FileList files={plan.filesToRead} />
-        </Section>
-        <Section title="Files to modify">
-          <FileList files={plan.filesToModify} />
-        </Section>
-        <Section title="Files to create">
-          <FileList files={plan.filesToCreate} />
-        </Section>
-        {plan.testPlan && (
-          <Section title="Test plan">
-            <p className="text-sm whitespace-pre-wrap">{plan.testPlan}</p>
-          </Section>
-        )}
-        <Section title="Risks">
-          <RiskList risks={plan.risks} />
-        </Section>
-      </div>
-      <div
-        className="px-4 py-2 border-t flex items-center justify-end gap-2"
-        style={{ borderColor: '#1f1f1f' }}
-      >
-        {resolved ? (
-          <span
-            className="text-sm font-mono"
-            style={{
-              color: resolution === 'approved' ? '#4ade80' : '#f87171',
-            }}
-          >
-            {resolution === 'approved' ? 'Plan approved' : 'Plan rejected'}
-          </span>
-        ) : (
-          <>
-            <button
-              onClick={onReject}
-              disabled={pending}
-              className="px-3 py-1.5 text-sm rounded-md font-medium transition-opacity disabled:opacity-50"
-              style={{
-                backgroundColor: 'transparent',
-                color: '#f87171',
-                border: '1px solid rgba(248, 113, 113, 0.4)',
-              }}
-            >
-              Reject
-            </button>
-            <button
-              onClick={onApprove}
-              disabled={pending}
-              className="px-3 py-1.5 text-sm rounded-md font-medium transition-opacity disabled:opacity-50"
-              style={{
-                backgroundColor: '#4ade80',
-                color: '#0a0a0a',
-                border: '1px solid #4ade80',
-              }}
-            >
-              Approve
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
+function FileList({ label, files }: { label: string; files?: string[] }) {
+  if (!files?.length) return null;
+  return <div><h3>{label} <span>{files.length}</span></h3>{files.map(file => <p key={file} title={file}><span aria-hidden>{label === 'Create' ? '+' : '~'}</span> {file}</p>)}</div>;
 }

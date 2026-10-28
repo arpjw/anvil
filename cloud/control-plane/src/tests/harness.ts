@@ -210,6 +210,12 @@ export function createMemoryRepository(): Repository & {
       return session;
     },
 
+    async updateSessionPlan(id, plan) {
+      const existing = sessionsById.get(id);
+      if (!existing) throw new Error('session not found');
+      sessionsById.set(id, { ...existing, planJson: plan });
+    },
+
     async updateSessionStatus(id, status) {
       const existing = sessionsById.get(id);
       if (!existing) throw new Error('session not found');
@@ -444,6 +450,12 @@ export function createMemoryRepository(): Repository & {
     },
 
     async createDiff(input) {
+      const existing = [...diffsById.values()].find(d => d.sessionId === input.sessionId && d.filepath === input.filepath);
+      if (existing) {
+        const updated: Diff = { ...existing, newContent: input.newContent, status: 'pending' };
+        diffsById.set(existing.id, updated);
+        return updated;
+      }
       const diff: Diff = {
         id: uuid(),
         sessionId: input.sessionId,
@@ -726,6 +738,7 @@ export function createHarness(): Harness {
   const stripe = createStripeStub();
   const deps: AppDeps = {
     repo,
+    sessionRuntime: { apiKeyForModel: () => "test-key", start: async () => {} },
     verifyToken: createVerifyTokenStub(tokens),
     githubClient: createGithubStub(github),
     stripe: stripe.client,

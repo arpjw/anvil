@@ -10,6 +10,7 @@ const RECONNECT_DELAY_MS = 5_000;
 type ControlMessage =
   | { type: 'start'; payload: StartPayload }
   | { type: 'approve' }
+  | { type: 'reject' }
   | { type: 'revise'; payload: { feedback: string } }
   | { type: 'abort' }
   | { type: 'setup'; payload: SetupPayload };
@@ -29,19 +30,7 @@ interface SetupPayload {
   generatedRules?: string | null;
 }
 
-interface AnvilAgent {
-  uiStream: {
-    on(event: 'event', listener: (e: unknown) => void): void;
-    off(event: 'event', listener: (e: unknown) => void): void;
-    resolveApproval(answer: 'y' | 'n' | 'revise', feedback?: string): void;
-  };
-  runOrchestrator(
-    request: string,
-    workdir: string,
-    sessionId: string,
-    options?: { model?: string },
-  ): Promise<{ summary?: string } | void>;
-}
+type AnvilAgent = typeof import('anvil-agent');
 
 async function loadAnvilAgent(): Promise<AnvilAgent> {
   try {
@@ -56,7 +45,7 @@ async function loadAnvilAgent(): Promise<AnvilAgent> {
       `[anvil-runtime] FATAL: could not load 'anvil-agent' package: ${message}`,
     );
     console.error(
-      "[anvil-runtime] make sure 'anvil-agent' is installed globally inside the VM image.",
+      "[anvil-runtime] build the repository library before starting the VM runtime.",
     );
     process.exit(1);
   }
@@ -86,30 +75,37 @@ async function handleStart(
     });
     return;
   }
-  process.env.ANTHROPIC_API_KEY = payload.apiKey;
 
   const agent = await loadAnvilAgent();
   state.agent = agent;
   state.sessionId = payload.sessionId;
 
-  const forward = (event: unknown) => {
+  const forward = (raw: unknown) => {
+    const event = raw as import('anvil-agent').UIEvent;
+    if (['done', 'session_failed', 'session_cancelled'].includes(event.type)) return;
     send(ws, { type: 'event', payload: event });
+    // Cloud users approve the plan before execution and review final file diffs
+    // before opening a PR. There is no terminal hunk picker in the VM.
+    if (event.type === 'diff_ready') {
+      agent.uiStream.resolveDiff(new Set(event.diff.hunks.map((_, i) => i)), event.filepath, event.hunkCount);
+    }
   };
   state.forwardListener = forward;
   agent.uiStream.on('event', forward);
 
   try {
+    const spec = agent.AVAILABLE_MODELS.find(m => m.id === payload.model);
+    if (!spec) throw new Error(`Unsupported model: ${payload.model}`);
+    const client = agent.buildClient(spec.id, spec.baseURL, payload.apiKey);
     const result = await agent.runOrchestrator(
       payload.request,
       payload.repoPath,
       payload.sessionId,
-      { model: payload.model },
+      { modelId: payload.model, client, headless: true, noOpen: true, autoBranch: false },
     );
-    const summary =
-      result && typeof result === 'object' && 'summary' in result
-        ? (result as { summary?: string }).summary
-        : undefined;
-    send(ws, { type: 'done', payload: { summary: summary ?? null } });
+    if (result.status === 'complete') send(ws, { type: 'done', payload: { summary: result.summary } });
+    else if (result.status === 'aborted') send(ws, { type: 'aborted' });
+    else send(ws, { type: 'error', payload: { message: result.summary } });
   } catch (err) {
     const e = err as Error;
     send(ws, {
@@ -132,12 +128,13 @@ async function handleSetup(
   const target = join('/workspace', 'repo');
   mkdirSync(dirname(target), { recursive: true });
 
-  const cloneUrl = payload.githubToken
-    ? payload.repoUrl.replace(
-        'https://',
-        `https://x-access-token:${payload.githubToken}@`,
-      )
-    : payload.repoUrl;
+  // Keep credentials out of the clone URL, process arguments, and .git/config.
+  const cloneEnv = { ...process.env };
+  if (payload.githubToken) {
+    cloneEnv.GIT_CONFIG_COUNT = '1';
+    cloneEnv.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
+    cloneEnv.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-access-token:${payload.githubToken}`).toString('base64')}`;
+  }
 
   const args = [
     'clone',
@@ -145,12 +142,12 @@ async function handleSetup(
     '1',
     '--branch',
     payload.branch,
-    cloneUrl,
+    payload.repoUrl,
     target,
   ];
 
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn('git', args, { stdio: 'inherit' });
+    const proc = spawn('git', args, { stdio: 'inherit', env: cloneEnv });
     proc.on('error', reject);
     proc.on('exit', (code) => {
       if (code === 0) resolve();
@@ -203,6 +200,9 @@ function handleConnection(ws: WebSocket, state: RunState): void {
           break;
         case 'approve':
           state.agent?.uiStream.resolveApproval('y');
+          break;
+        case 'reject':
+          state.agent?.uiStream.resolveApproval('n');
           break;
         case 'revise':
           state.agent?.uiStream.resolveApproval(

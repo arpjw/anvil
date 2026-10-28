@@ -24,7 +24,7 @@ async function seedUser(): Promise<{ token: string; userId: string; repoId: stri
   const session = await h.repo.createSession({
     userId: user.id,
     repoId: repo.id,
-    status: 'reviewing',
+    status: 'complete',
     branch: 'main',
     request: 'add readme',
     model: 'claude-sonnet-4-6',

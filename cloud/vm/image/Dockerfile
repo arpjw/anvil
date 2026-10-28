@@ -1,25 +1,14 @@
-# Anvil VM image — simulates the Firecracker rootfs for local development.
-# In production, the same setup is baked into a Firecracker ext4 image
-# (see ./setup.sh). Here we just package it as a Docker image.
-
-FROM node:20-slim
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-       git \
-       ripgrep \
-       ca-certificates \
-       curl \
-  && rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g typescript-language-server typescript anvil-agent
-
-COPY cloud/vm/runtime/ /runtime/
-WORKDIR /runtime
-
-RUN npm install \
- && npm run build
-
+# Build from the repository root: docker build -f cloud/vm/image/Dockerfile .
+FROM node:22-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/anvil
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
+COPY cloud/vm/runtime/ ./cloud/vm/runtime/
+WORKDIR /opt/anvil/cloud/vm/runtime
+RUN npm install && npm run build
 EXPOSE 8080
-
 CMD ["node", "dist/server.js"]

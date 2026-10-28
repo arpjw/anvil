@@ -3,6 +3,7 @@ import { readdir } from 'fs/promises';
 import { join, extname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
+import { findServerBin } from '../lsp/client.js';
 
 type Language = 'typescript' | 'python' | 'go' | 'rust';
 
@@ -43,6 +44,9 @@ const LSP_MAP: Record<Language, LspRequirement> = {
 const EXT_TO_LANG: Record<string, Language> = {
   '.ts': 'typescript',
   '.tsx': 'typescript',
+  '.js': 'typescript',
+  '.jsx': 'typescript',
+  '.mjs': 'typescript',
   '.py': 'python',
   '.go': 'go',
   '.rs': 'rust',
@@ -77,14 +81,15 @@ export function getLspRequirements(languages: Set<Language>): LspRequirement[] {
   return [...languages].map(l => LSP_MAP[l]);
 }
 
-export function checkLspInstalled(req: LspRequirement): boolean {
+export function checkLspInstalled(req: LspRequirement, workdir = process.cwd()): boolean {
+  if (req.server === 'typescript-language-server') return !!findServerBin(workdir);
   try {
     execSync(`which ${req.binName}`, { stdio: 'ignore' });
     return true;
   } catch {
     // fall through to check common paths
   }
-  const localBin = join(process.cwd(), 'node_modules', '.bin', req.binName);
+  const localBin = join(workdir, 'node_modules', '.bin', req.binName);
   if (existsSync(localBin)) return true;
   for (const p of req.checkPaths) {
     if (existsSync(join(p, req.binName))) return true;
@@ -124,8 +129,9 @@ export async function promptAndInstall(workdir: string): Promise<void> {
   const state = loadLspState();
 
   for (const req of reqs) {
+    if (req.server !== 'typescript-language-server') continue;
     if (state[req.server]) continue;
-    if (checkLspInstalled(req)) {
+    if (checkLspInstalled(req, workdir)) {
       state[req.server] = true;
       continue;
     }

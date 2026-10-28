@@ -3,12 +3,13 @@ import { uiStream } from '../ui/stream.js';
 
 let handlerRegistered = false;
 let interrupted = false;
+let signalHandler: (() => void) | null = null;
 
 export function registerInterruptHandler(sessionId: string, workdir: string): void {
   if (handlerRegistered) return;
   handlerRegistered = true;
 
-  process.on('SIGINT', () => {
+  signalHandler = () => {
     if (!interrupted) {
       interrupted = true;
       uiStream.push({ type: 'interrupt_requested' });
@@ -24,24 +25,25 @@ export function registerInterruptHandler(sessionId: string, workdir: string): vo
           }
           process.exit(0);
         } else if (action === 'stop') {
-          uiStream.ensureDone('Stopped by user.');
-          process.exit(0);
+          uiStream.push({ type: 'session_cancelled', summary: 'Stopped by user. Recovery plan retained.' });
+          process.exit(130);
         } else {
           // continue — reset flag so next Ctrl+C works again
           interrupted = false;
         }
       }).catch(() => { /* ignore */ });
     } else {
-      // Second Ctrl+C before user responded: force rollback and exit
-      console.error('\nForce exit — rolling back…');
-      rollbackSession(workdir, sessionId)
-        .then(() => process.exit(130))
-        .catch(() => process.exit(130));
+      // Leave the working tree in place for inspection and recovery.
+      console.error('\nForce exit. Changes and recovery plan retained.');
+      process.exit(130);
     }
-  });
+  };
+  process.on('SIGINT', signalHandler);
 }
 
 export function resetInterruptHandler(): void {
+  if (signalHandler) process.off('SIGINT', signalHandler);
+  signalHandler = null;
   handlerRegistered = false;
   interrupted = false;
 }

@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - run: npm ci && npm run build
+        working-directory: cloud/vm/runtime
+  control-plane:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud/control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: cloud/dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build

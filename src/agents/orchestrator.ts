@@ -1,76 +1,34 @@
 import OpenAI from 'openai';
-import { readFileSync } from 'fs';
+import { shutdownLspClient } from '../lsp/client.js';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, relative, join } from 'path';
 import { runPlanner, type Plan } from './planner.js';
 import { runExecutor } from './executor.js';
 import { uiStream, type UIEvent } from '../ui/stream.js';
-import {
-  getGitContext,
-  createSessionBranch,
-  commitFile,
-  generatePRDescription,
-} from '../git/client.js';
+import { getGitContext, createSessionBranch, commitFile, generatePRDescription } from '../git/client.js';
 import { loadContext, buildContextSection, appendMemory } from '../context/index.js';
 import { runVerification } from '../execution/verifier.js';
-import { checkEditSize } from '../execution/guard.js';
-import { registerInterruptHandler } from '../execution/interrupt.js';
+import { registerInterruptHandler, resetInterruptHandler } from '../execution/interrupt.js';
 import type { ImageContentBlock } from '../context/image.js';
-import { AVAILABLE_MODELS, loadConfig } from '../setup/config.js';
-import {
-  appendTurn,
-  loadConversation,
-  summarizeHistory,
-  turnCount,
-} from '../session/conversation.js';
-import {
-  BudgetExceededError,
-  clearSessionUsage,
-  initSessionUsage,
-  persistSessionUsage,
-} from '../billing/usage.js';
-import {
-  createWorkflowState,
-  transition,
-  formatPhase,
-  phaseIndex,
-  WORKFLOW_TOTAL,
-  WorkflowPhase,
-  PHASE_LABELS,
-  checkpoint as checkpointWorkflow,
-  loadCheckpoint,
-  clearCheckpoint,
-  hasProgressBeyondInit,
-  type WorkflowState,
-} from './workflow.js';
+import { AVAILABLE_MODELS, buildClient, loadConfig } from '../setup/config.js';
+import { appendTurn, loadConversation, summarizeHistory } from '../session/conversation.js';
+import { clearSessionUsage, initSessionUsage, persistSessionUsage } from '../billing/usage.js';
+import { persistSessionResult, type SessionResult } from '../session/result.js';
+import { createWorkflowState, transition, phaseIndex, WORKFLOW_TOTAL, WorkflowPhase,
+  PHASE_LABELS, checkpoint, clearCheckpoint, type WorkflowState } from './workflow.js';
 
 function advance(state: WorkflowState, to: WorkflowPhase): WorkflowState {
-  const from = state.phase;
-  const next = transition(state, to);
-  const withCheckpoint = checkpointWorkflow(next, from);
-  uiStream.push({
-    type: 'phase_transition',
-    from,
-    to,
-    sessionId: state.sessionId,
-    index: phaseIndex(to),
-    total: WORKFLOW_TOTAL,
-    label: PHASE_LABELS[to],
-  });
-  return withCheckpoint;
+  const next = checkpoint(transition(state, to), state.phase);
+  uiStream.push({ type: 'phase_transition', from: state.phase, to, sessionId: state.sessionId,
+    index: phaseIndex(to), total: WORKFLOW_TOTAL, label: PHASE_LABELS[to] });
+  return next;
 }
 
-// ── Complexity heuristic ──────────────────────────────────────────────────────
-
-const MULTI_FILE_KEYWORDS = [
-  'refactor', 'rename', 'move', 'across', 'throughout', 'everywhere',
-  'all files', 'multiple files', 'each file', 'every file',
-];
-
+const MULTI_FILE_KEYWORDS = ['refactor', 'rename', 'move', 'across', 'throughout', 'everywhere',
+  'all files', 'multiple files', 'each file', 'every file'];
 function isComplex(request: string): boolean {
-  const lower = request.toLowerCase();
-  if (MULTI_FILE_KEYWORDS.some(kw => lower.includes(kw))) return true;
-  const fileMentions = request.match(/\b[\w./][\w./]*\.(ts|js|py|json|md|css|html)\b/g) ?? [];
-  return new Set(fileMentions).size >= 2;
+  return MULTI_FILE_KEYWORDS.some(kw => request.toLowerCase().includes(kw)) ||
+    new Set(request.match(/\b[\w./][\w./]*\.(ts|js|py|json|md|css|html)\b/g) ?? []).size >= 2;
 }
 
 export interface OrchestratorOptions {
@@ -84,434 +42,194 @@ export interface OrchestratorOptions {
   continueConversation?: boolean;
   budgetCapUSD?: number | null;
   noOpen?: boolean;
+  autoBranch?: boolean;
+  resumePlan?: Plan;
 }
 
-// ── Orchestrator ──────────────────────────────────────────────────────────────
+let activeSession: string | null = null;
 
 export async function runOrchestrator(
-  request: string,
-  workdir: string,
-  sessionId: string,
-  options: OrchestratorOptions = {},
-): Promise<void> {
-  const {
-    noVerify = false,
-    headless = false,
-    image = null,
-    systemPrompt,
-    client,
-    modelId,
-    continueConversation = false,
-    budgetCapUSD: budgetCapFromOpts,
-    noOpen = false,
-  } = options;
-
-  const effectiveBudgetCap =
-    budgetCapFromOpts !== undefined ? budgetCapFromOpts : loadConfig().budgetCapUSD;
-
-  // Resolve effective client and model — fall back to config if not provided by caller.
-  const effectiveModelId = modelId ?? loadConfig().model;
-  const effectiveSpec = AVAILABLE_MODELS.find(m => m.id === effectiveModelId) ?? AVAILABLE_MODELS[0];
-  const effectiveApiKey = process.env[effectiveSpec.envKey] ?? process.env.ANTHROPIC_API_KEY ?? '';
-  const effectiveBaseURL = effectiveSpec.baseURL ?? 'https://api.anthropic.com/v1';
-  const effectiveClient = client ?? new OpenAI({ apiKey: effectiveApiKey, baseURL: effectiveBaseURL });
-
-  // Initialise per-session usage tracking. The loop reads and updates this
-  // through addUsage(); the TUI subscribes to usage_update events.
-  const initialUsage = initSessionUsage(sessionId, effectiveModelId);
-  uiStream.push({ type: 'usage_update', usage: initialUsage });
-
-  // 10-phase workflow (light: emits phase_transition events, does not enforce control flow).
+  request: string, workdir: string, sessionId: string, options: OrchestratorOptions = {},
+): Promise<SessionResult> {
+  if (activeSession) throw new Error(`Session ${activeSession} is already active in this process.`);
+  activeSession = sessionId;
+  uiStream.resetSession();
+  workdir = resolve(workdir);
+  const config = loadConfig();
+  const modelId = options.modelId ?? config.model;
+  const spec = AVAILABLE_MODELS.find(m => m.id === modelId);
+  const budget = options.budgetCapUSD !== undefined ? options.budgetCapUSD : config.budgetCapUSD;
+  const noVerify = options.noVerify ?? !config.autoVerify;
+  const files = new Set<string>();
   let workflow = createWorkflowState(sessionId);
-  const priorCheckpoint = loadCheckpoint(sessionId);
-  if (priorCheckpoint && hasProgressBeyondInit(priorCheckpoint)) {
-    workflow = priorCheckpoint;
-    const summary = `Resuming session ${sessionId.slice(0, 8)} from ${formatPhase(priorCheckpoint.phase)} (checkpoints: ${priorCheckpoint.checkpoints
-      .map((p) => PHASE_LABELS[p])
-      .join(', ')})`;
-    uiStream.push({ type: 'session_resumed', sessionId, plan: {
-      goal: summary,
-      context: '',
-      filesToModify: [],
-      filesToCreate: [],
-      steps: [],
-      verificationCriteria: [],
-      risks: [],
-    } });
-  }
-  uiStream.push({
-    type: 'phase_transition',
-    from: null,
-    to: workflow.phase,
-    sessionId,
-    index: phaseIndex(workflow.phase),
-    total: WORKFLOW_TOTAL,
-    label: PHASE_LABELS[workflow.phase],
-  });
-
-  // ── Step 1: Load all context before anything else ────────────────────────────
-  const ctx = await loadContext(request, workdir);
-
-  uiStream.push({
-    type: 'context_loaded',
-    filesResolved: ctx.files.length,
-    symbolsResolved: ctx.symbols.length,
-    docsResolved: ctx.docs.length,
-    webResolved: ctx.web.length,
-    rulesLoaded: ctx.rules !== null,
-    memoryLoaded: ctx.memory !== null,
-  });
-
-  // Load prior conversation if --continue was requested.
-  let conversationSection = '';
-  if (continueConversation) {
-    const history = loadConversation(workdir);
-    if (history && history.turns.length > 0) {
-      conversationSection = summarizeHistory(history);
-      uiStream.push({
-        type: 'conversation_loaded',
-        priorTurns: history.turns.length,
-        conversationId: history.id,
-      });
-    }
-  }
-
-  const baseContext = buildContextSection(ctx);
-  const contextSection = [
-    systemPrompt ? `## Slash Command Instructions\n\n${systemPrompt}` : '',
-    conversationSection ? `## ${conversationSection}` : '',
-    baseContext || '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-  const { ignorePatterns } = ctx;
-
-  // Use cleanRequest (mentions stripped) for everything downstream
-  const cleanRequest = ctx.cleanRequest || request;
-
-  // ── Step 2: Fetch git context ────────────────────────────────────────────────
-  const gitCtx = await getGitContext(workdir).catch(() => null);
-
-  // ── Helper: capture done summary for memory ──────────────────────────────────
-  let doneSummary = '';
-  const captureDone = (ev: UIEvent): void => {
-    if (ev.type === 'done') doneSummary = ev.summary;
+  let branchName = '';
+  let summary = '';
+  const startedAt = new Date().toISOString();
+  let result: SessionResult | undefined;
+  const capture = (event: UIEvent): void => {
+    if (event.type === 'file_modified') files.add(event.path);
   };
+  uiStream.on('event', capture);
+  try {
+    if (!spec && !options.client) throw new Error(`Unknown model: ${modelId}`);
+    const apiKey = spec ? process.env[spec.envKey] ?? (spec.envKey === 'ANTHROPIC_API_KEY' ? config.apiKey : null) : null;
+    if (!options.client && !apiKey) throw new Error(`${spec?.envKey ?? 'API key'} is not set for ${modelId}.`);
+    const client = options.client ?? buildClient(modelId, spec!.baseURL, apiKey!);
+    uiStream.push({ type: 'usage_update', usage: initSessionUsage(sessionId, modelId) });
+    const ctx = await loadContext(request, workdir);
+    const contextSection = [options.systemPrompt, buildContextSection(ctx),
+      options.continueConversation ? summarizeHistory(loadConversation(workdir) ?? { id: '', workdir, turns: [], createdAt: new Date(), updatedAt: new Date() }) : '',
+    ].filter(Boolean).join('\n\n');
+    const cleanRequest = ctx.cleanRequest || request;
+    uiStream.push({ type: 'context_loaded', filesResolved: ctx.files.length, symbolsResolved: ctx.symbols.length,
+      docsResolved: ctx.docs.length, webResolved: ctx.web.length, rulesLoaded: ctx.rules !== null, memoryLoaded: ctx.memory !== null });
 
-  // ── Helper: track modified files for conversation turn + editor auto-open ───
-  const filesModifiedSet = new Set<string>();
-  const captureFilesModified = (ev: UIEvent): void => {
-    if (ev.type === 'file_modified') filesModifiedSet.add(ev.path);
-  };
-  uiStream.on('event', captureFilesModified);
-
-  // ── Open changed files in $EDITOR (Feature 5). detached + stdio:'ignore'
-  //    means the parent exits without waiting; ideal for GUI editors like
-  //    cursor/code/subl. Terminal editors (vim/nvim) won't render properly —
-  //    users can disable with --no-open or `anvilai config set autoOpen false`.
-  const maybeOpenEditor = async (): Promise<void> => {
-    if (noOpen || headless) return;
-    if (!loadConfig().autoOpen) return;
-    const editor = process.env.EDITOR;
-    const files = Array.from(filesModifiedSet);
-    if (files.length === 0) return;
-    if (!editor) {
-      uiStream.push({
-        type: 'error',
-        message: 'Tip: set EDITOR=cursor (or code, subl) to auto-open changed files.',
-      });
-      return;
-    }
-    try {
-      const { execa } = await import('execa');
-      const parts = editor.split(/\s+/).filter(Boolean);
-      const [cmd, ...editorArgs] = parts;
-      if (!cmd) return;
-      execa(cmd, [...editorArgs, ...files], {
-        cwd: workdir,
-        detached: true,
-        stdio: 'ignore',
-      }).catch(() => { /* editor may exit non-zero; not our problem */ });
-      uiStream.push({
-        type: 'error',
-        message: `Opening ${files.length} file${files.length === 1 ? '' : 's'} in ${cmd}`,
-      });
-    } catch {
-      /* execa spawn failure — non-fatal */
-    }
-  };
-
-  // ── Persist the two conversation turns (user request + assistant summary) ──
-  const persistConversationTurns = (): void => {
-    try {
-      appendTurn(workdir, {
-        role: 'user',
-        content: request,
-        timestamp: new Date(),
-        sessionId,
-      });
-      if (doneSummary) {
-        appendTurn(workdir, {
-          role: 'assistant',
-          content: doneSummary,
-          timestamp: new Date(),
-          sessionId,
-          filesModified: Array.from(filesModifiedSet),
-        });
+    let plan: Plan;
+    if (options.resumePlan) {
+      plan = options.resumePlan;
+      workflow = advance(workflow, WorkflowPhase.PLANNING);
+      uiStream.push({ type: 'session_resumed', sessionId, plan });
+    } else if (isComplex(cleanRequest) || options.image) {
+      const gitCtx = await getGitContext(workdir).catch(() => null);
+      workflow = advance(workflow, WorkflowPhase.EXPLORING);
+      let feedback: string | undefined;
+      for (;;) {
+        const path = await runPlanner(cleanRequest, workdir, sessionId, feedback, gitCtx, {
+          contextSection, rules: ctx.rules, memory: ctx.memory, ignorePatterns: ctx.ignorePatterns, image: options.image,
+        }, client, modelId, budget);
+        plan = JSON.parse(readFileSync(path, 'utf-8')) as Plan;
+        workflow = advance(workflow, WorkflowPhase.PLANNING);
+        uiStream.push({ type: 'plan_ready', plan });
+        workflow = advance(workflow, WorkflowPhase.AWAITING_APPROVAL);
+        const approval = await uiStream.waitForApproval();
+        if (approval.answer === 'y') break;
+        if (approval.answer === 'n') {
+          result = makeResult('aborted', 'Plan rejected by user.', 'skipped', []);
+          uiStream.push({ type: 'session_cancelled', summary: result.summary });
+          return result;
+        }
+        feedback = approval.feedback;
+        workflow = advance(workflow, WorkflowPhase.EXPLORING);
       }
-    } catch { /* non-fatal */ }
-  };
+    } else {
+      workflow = advance(workflow, WorkflowPhase.PLANNING);
+      plan = { goal: cleanRequest, context: 'Single-file request, planner skipped.', filesToModify: [],
+        filesToCreate: [], steps: [cleanRequest], verificationCriteria: [], risks: [] };
+    }
 
-  // ── Simple path ──────────────────────────────────────────────────────────────
-  if (!isComplex(cleanRequest)) {
-    workflow = advance(workflow, WorkflowPhase.PLANNING);
-    const plan: Plan = {
-      goal: cleanRequest,
-      context: 'Single-file request, planner skipped.',
-      filesToModify: [],
-      filesToCreate: [],
-      steps: [cleanRequest],
-      verificationCriteria: [],
-      risks: [],
-    };
-
-    uiStream.on('event', captureDone);
+    // Keep a workspace-bound plan for every path, including single-file tasks.
+    const sessionDir = join('/tmp/anvil', sessionId);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, 'plan.json'), JSON.stringify(plan, null, 2));
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ sessionId, workdir, request, modelId }, null, 2));
+    if (!options.headless) registerInterruptHandler(sessionId, workdir);
+    if (options.autoBranch ?? config.autoBranch) {
+      workflow = advance(workflow, WorkflowPhase.BRANCHING);
+      // Fail before execution if an isolated branch cannot be prepared.
+      branchName = await createSessionBranch(workdir, sessionId);
+      uiStream.push({ type: 'branch_created', branchName });
+    }
     workflow = advance(workflow, WorkflowPhase.EXECUTING);
     uiStream.push({ type: 'phase', phase: 'executing' });
-    const report = await runExecutor(plan, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId, effectiveBudgetCap);
-    uiStream.off('event', captureDone);
+    const extraContext = [contextSection, options.resumePlan
+      ? 'This is a resumed session. Read current files and complete the original plan. Preserve changes already applied; do not repeat completed edits.' : '',
+    ].filter(Boolean).join('\n\n');
+    const report = await runExecutor(plan, workdir, sessionId, ctx.ignorePatterns, extraContext || undefined, client, modelId, budget);
+    summary = report.summary;
+    if (!report.success) throw new Error(report.escalations.join('\n') || 'Executor did not finish the task.');
 
-    reportEscalations(report.escalations);
-
+    let verification: SessionResult['verification'] = 'skipped';
+    if (noVerify) uiStream.push({ type: 'verification_skipped' });
     if (!noVerify) {
       workflow = advance(workflow, WorkflowPhase.VERIFYING);
-      const verResult = await runVerification(workdir, sessionId, plan, ignorePatterns, effectiveClient, effectiveModelId);
-      if (verResult.passed) {
-        await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
-      } else {
-        reportVerificationFailure(verResult.rounds, verResult.remainingFailures);
+      const verified = await runVerification(workdir, sessionId, plan, ctx.ignorePatterns, client, modelId, budget);
+      verification = verified.skipped ? 'skipped' : verified.passed ? 'passed' : 'failed';
+      if (!verified.passed) {
+        result = makeResult('failed', 'Verification failed. Changes are available for review and recovery.', verification, verified.remainingFailures);
+        uiStream.push({ type: 'session_failed', message: result.summary });
+        return result;
       }
-    } else {
-      await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
     }
 
+    // Commit after all fix rounds so the branch contains the exact verified files.
+    workflow = advance(workflow, WorkflowPhase.COMMITTING);
+    if (branchName) {
+      for (const filepath of files) {
+        const message = `feat: update ${relative(workdir, filepath)}`;
+        const commitHash = await commitFile(workdir, filepath, message);
+        if (commitHash) uiStream.push({ type: 'file_committed', filepath, message, commitHash });
+      }
+    }
+    if (verification === 'passed' && summary) {
+      appendMemory(workdir, sessionId, summary);
+      uiStream.push({ type: 'memory_written', path: join(workdir, '.anvil', 'memory.md') });
+      if (branchName) {
+        const path = await generatePRDescription(sessionId, workdir);
+        uiStream.push({ type: 'pr_description_ready', path });
+      }
+    }
     workflow = advance(workflow, WorkflowPhase.COMPLETE);
     clearCheckpoint(sessionId);
-    persistConversationTurns();
-    await maybeOpenEditor();
-    uiStream.off('event', captureFilesModified);
-    persistSessionUsage(workdir, sessionId);
-    clearSessionUsage(sessionId);
-    uiStream.ensureDone('All steps completed successfully.');
-    return;
-  }
-
-  // ── Complex path: planner → approval gate → branch → executor ────────────────
-  let feedback: string | undefined;
-  let plan: Plan;
-
-  workflow = advance(workflow, WorkflowPhase.EXPLORING);
-
-  for (;;) {
-    const [planPath] = await Promise.all([
-      runPlanner(cleanRequest, workdir, sessionId, feedback, gitCtx, {
-        contextSection: contextSection || undefined,
-        rules: ctx.rules,
-        memory: ctx.memory,
-        ignorePatterns,
-        image,
-      }, effectiveClient, effectiveModelId, effectiveBudgetCap),
-    ]);
-
-    workflow = advance(workflow, WorkflowPhase.PLANNING);
-    plan = JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
-    uiStream.push({ type: 'plan_ready', plan });
-
-    workflow = advance(workflow, WorkflowPhase.AWAITING_APPROVAL);
-    const response = await uiStream.waitForApproval();
-
-    if (response.answer === 'y') break;
-
-    if (response.answer === 'n') {
-      workflow = advance(workflow, WorkflowPhase.COMPLETE);
-      clearCheckpoint(sessionId);
-      doneSummary = doneSummary || 'Plan rejected by user.';
-      persistConversationTurns();
-      uiStream.off('event', captureFilesModified);
-      persistSessionUsage(workdir, sessionId);
-      clearSessionUsage(sessionId);
-      uiStream.push({ type: 'done', summary: 'Plan rejected by user.' });
-      return;
+    result = makeResult('complete', summary || 'All steps completed.', verification, []);
+    uiStream.ensureDone(result.summary);
+    if (!options.headless && !options.noOpen && config.autoOpen && process.env.EDITOR && files.size) {
+      const { execa } = await import('execa');
+      const [command, ...args] = process.env.EDITOR.split(/\s+/);
+      const child = execa(command!, [...args, ...files], { cwd: workdir, detached: true, stdio: 'ignore' });
+      child.unref();
+      void child.catch(() => {});
     }
-
-    feedback = response.feedback;
-    workflow = advance(workflow, WorkflowPhase.EXPLORING);
-    uiStream.push({ type: 'phase', phase: 'planning' });
-  }
-
-  // Guard: warn if the edit is very large.
-  const guard = checkEditSize(plan!, workdir);
-  if (guard.isLarge) {
-    if (headless) {
-      console.warn(`[anvil] Large edit detected: ~${guard.tokenEstimate} tokens across ${guard.fileCount} files. Proceeding automatically.`);
-    } else {
-      // In TUI mode, surface the warning in the activity log — user already approved the plan.
-      uiStream.push({
-        type: 'error',
-        message: `Large edit: ~${guard.tokenEstimate} tokens across ${guard.fileCount} files. Proceeding as approved.`,
-      });
-    }
-  }
-
-  // Register interrupt handler for TUI sessions.
-  if (!headless) {
-    registerInterruptHandler(sessionId, workdir);
-  }
-
-  // Create session branch before the executor touches any files.
-  workflow = advance(workflow, WorkflowPhase.BRANCHING);
-  let branchName: string | null = null;
-  try {
-    branchName = await createSessionBranch(workdir, sessionId);
-    uiStream.push({ type: 'branch_created', branchName });
+    return result;
   } catch (err) {
-    uiStream.push({ type: 'error', message: `Branch creation failed: ${(err as Error).message}` });
-  }
-
-  // Per-file git commit listener, serialized via a promise chain.
-  let commitQueue = Promise.resolve();
-  const planRef = plan!;
-
-  const handleFileModified = (event: UIEvent): void => {
-    if (event.type !== 'file_modified') return;
-    const filepath = event.path;
-
-    commitQueue = commitQueue.then(async () => {
-      try {
-        const rel = relative(workdir, filepath);
-        const isNew = planRef.filesToCreate.some(f => resolve(workdir, f) === filepath);
-        const message = `feat: ${isNew ? 'add' : 'update'} ${rel}`;
-        const hash = await commitFile(workdir, filepath, message);
-        uiStream.push({ type: 'file_committed', filepath, message, commitHash: hash });
-      } catch (err) {
-        uiStream.push({ type: 'error', message: `git commit failed: ${(err as Error).message}` });
+    const message = (err as Error).message;
+    result = makeResult('failed', message, 'skipped', [message]);
+    uiStream.push({ type: 'session_failed', message });
+    throw err;
+  } finally {
+    uiStream.off('event', capture);
+    await shutdownLspClient().catch(() => {});
+    resetInterruptHandler();
+    try {
+      if (result) {
+        persistSessionResult(workdir, result);
+        appendTurn(workdir, { role: 'user', content: request, timestamp: new Date(), sessionId });
+        appendTurn(workdir, { role: 'assistant', content: result.summary, timestamp: new Date(), sessionId, filesModified: [...files] });
       }
-    });
-  };
-
-  uiStream.on('event', handleFileModified);
-  uiStream.on('event', captureDone);
-
-  workflow = advance(workflow, WorkflowPhase.EXECUTING);
-  uiStream.push({ type: 'phase', phase: 'executing' });
-  const report = await runExecutor(planRef, workdir, sessionId, ignorePatterns, undefined, effectiveClient, effectiveModelId, effectiveBudgetCap);
-
-  // Drain the commit queue before post-session steps.
-  await commitQueue;
-  uiStream.off('event', handleFileModified);
-  uiStream.off('event', captureDone);
-
-  reportEscalations(report.escalations);
-
-  // ── Verification ─────────────────────────────────────────────────────────────
-  let verificationPassed = true;
-  if (!noVerify) {
-    workflow = advance(workflow, WorkflowPhase.VERIFYING);
-    const verResult = await runVerification(workdir, sessionId, planRef, ignorePatterns, effectiveClient, effectiveModelId);
-    verificationPassed = verResult.passed;
-    if (!verResult.passed) {
-      // verifier ran its own executor fix rounds; flag FIXING happened
-      workflow = advance(workflow, WorkflowPhase.FIXING);
-      reportVerificationFailure(verResult.rounds, verResult.remainingFailures);
+      persistSessionUsage(workdir, sessionId);
+    } finally {
+      clearSessionUsage(sessionId);
+      activeSession = null;
     }
   }
 
-  if (verificationPassed) {
-    workflow = advance(workflow, WorkflowPhase.COMMITTING);
-    await maybeAppendMemory(workdir, sessionId, doneSummary, ctx);
-    if (report.success && branchName) {
-      try {
-        const prPath = await generatePRDescription(sessionId, workdir);
-        uiStream.push({ type: 'pr_description_ready', path: prPath });
-      } catch { /* non-fatal */ }
-    }
+  function makeResult(status: SessionResult['status'], text: string, verification: SessionResult['verification'], failures: string[]): SessionResult {
+    return { sessionId, workdir, request, modelId, status, summary: text, verification, failures,
+      filesModified: [...files], branchName, startedAt, completedAt: new Date().toISOString() };
   }
-  // If verification failed, skip memory and PR — session is incomplete.
-
-  workflow = advance(workflow, WorkflowPhase.COMPLETE);
-  clearCheckpoint(sessionId);
-  persistConversationTurns();
-  await maybeOpenEditor();
-  uiStream.off('event', captureFilesModified);
-  clearSessionUsage(sessionId);
-  uiStream.ensureDone('All steps completed.');
 }
 
-// ── Dry-run mode ──────────────────────────────────────────────────────────────
-
-export async function runDryRun(
-  request: string,
-  workdir: string,
-  sessionId: string,
-): Promise<Plan> {
-  const ctx = await loadContext(request, workdir);
-  const cleanRequest = ctx.cleanRequest || request;
-  const { ignorePatterns } = ctx;
-
-  if (!isComplex(cleanRequest)) {
-    return {
-      goal: cleanRequest,
-      context: 'Single-file request — planner skipped (simple path).',
-      filesToModify: [],
-      filesToCreate: [],
-      steps: [cleanRequest],
-      verificationCriteria: [],
-      risks: [],
-    };
-  }
-
-  const gitCtx = await getGitContext(workdir).catch(() => null);
-
-  const planPath = await runPlanner(cleanRequest, workdir, sessionId, undefined, gitCtx, {
-    contextSection: buildContextSection(ctx) || undefined,
-    rules: ctx.rules,
-    memory: ctx.memory,
-    ignorePatterns,
-  });
-
-  return JSON.parse(readFileSync(planPath, 'utf-8')) as Plan;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function maybeAppendMemory(
-  workdir: string,
-  sessionId: string,
-  summary: string,
-  ctx: { rules: string | null; memory: string | null },
-): Promise<void> {
-  if (!summary) return;
+export async function runDryRun(request: string, workdir: string, sessionId: string, options: OrchestratorOptions = {}): Promise<Plan> {
+  if (activeSession) throw new Error(`Session ${activeSession} is already active in this process.`);
+  activeSession = sessionId;
+  const config = loadConfig();
+  const modelId = options.modelId ?? config.model;
+  const spec = AVAILABLE_MODELS.find(m => m.id === modelId);
   try {
-    appendMemory(workdir, sessionId, summary);
-    uiStream.push({
-      type: 'memory_written',
-      path: join(workdir, '.anvil', 'memory.md'),
-    });
-  } catch { /* non-fatal */ }
-}
-
-function reportEscalations(escalations: string[]): void {
-  for (const e of escalations) {
-    uiStream.push({ type: 'error', message: e });
+    if (!spec && !options.client) throw new Error(`Unknown model: ${modelId}`);
+    const key = spec ? process.env[spec.envKey] ?? (spec.envKey === 'ANTHROPIC_API_KEY' ? config.apiKey : null) : null;
+    if (!options.client && !key) throw new Error(`${spec?.envKey ?? 'API key'} is not set for ${modelId}.`);
+    const client = options.client ?? buildClient(modelId, spec!.baseURL, key!);
+    initSessionUsage(sessionId, modelId);
+    const ctx = await loadContext(request, workdir);
+    const gitCtx = await getGitContext(workdir).catch(() => null);
+    const path = await runPlanner(ctx.cleanRequest || request, workdir, sessionId, undefined, gitCtx, {
+      contextSection: [options.systemPrompt, buildContextSection(ctx)].filter(Boolean).join('\n\n'),
+      rules: ctx.rules, memory: ctx.memory, ignorePatterns: ctx.ignorePatterns, image: options.image,
+    }, client, modelId, options.budgetCapUSD !== undefined ? options.budgetCapUSD : config.budgetCapUSD);
+    return JSON.parse(readFileSync(path, 'utf-8')) as Plan;
+  } finally {
+    await shutdownLspClient().catch(() => {});
+    clearSessionUsage(sessionId);
+    activeSession = null;
   }
-}
-
-function reportVerificationFailure(rounds: number, remainingFailures: string[]): void {
-  const roundLabel = rounds === 1 ? '1 fix round' : `${rounds} fix rounds`;
-  const issueCount = remainingFailures.length;
-  const issueLabel = issueCount === 1 ? '1 issue' : `${issueCount} issues`;
-  uiStream.push({
-    type: 'error',
-    message: `Verification failed after ${roundLabel}: ${issueLabel} remain. Session not saved to memory.`,
-  });
 }

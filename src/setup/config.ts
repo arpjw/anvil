@@ -371,7 +371,7 @@ function parseValue(key: ConfigKey, raw: string): AnvilConfig[ConfigKey] {
   }
   if (expected === 'number') {
     const n = Number(raw);
-    if (isNaN(n)) throw new Error(`Invalid number value "${raw}".`);
+    if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid number value "${raw}".`);
     return n;
   }
   if (expected === 'string|null') {
@@ -380,7 +380,7 @@ function parseValue(key: ConfigKey, raw: string): AnvilConfig[ConfigKey] {
   if (expected === 'number|null') {
     if (raw === 'null') return null;
     const n = Number(raw);
-    if (isNaN(n)) throw new Error(`Invalid number value "${raw}".`);
+    if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid number value "${raw}".`);
     return n;
   }
   return raw;
@@ -400,7 +400,7 @@ export function runConfigSet(key: string, value: string): void {
     process.exit(1);
   }
   saveConfig({ [k]: parsed } as Partial<AnvilConfig>);
-  console.log(`Set ${key} to ${JSON.stringify(parsed)} ✓`);
+  console.log(`Set ${key} to ${JSON.stringify(k === 'apiKey' && parsed ? '[redacted]' : parsed)} ✓`);
 }
 
 export function runConfigGet(key: string): void {
@@ -410,7 +410,7 @@ export function runConfigGet(key: string): void {
   }
   const config = loadConfig();
   const val = config[key as ConfigKey];
-  console.log(JSON.stringify(val));
+  console.log(JSON.stringify(key === 'apiKey' && val ? '[redacted]' : val));
 }
 
 export function runConfigList(): void {
@@ -419,7 +419,7 @@ export function runConfigList(): void {
   const maxLen = Math.max(...keys.map(k => k.length));
   console.log('\nAnvil configuration (~/.anvil/config.json):\n');
   for (const k of keys) {
-    const val = JSON.stringify(config[k]);
+    const val = JSON.stringify(k === 'apiKey' && config[k] ? '[redacted]' : config[k]);
     console.log(`  ${k.padEnd(maxLen)}  ${val}`);
   }
   console.log();

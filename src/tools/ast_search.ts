@@ -22,12 +22,14 @@ export async function astSearch(
   }
 
   const lines: string[] = [];
+  let parseFailures = 0;
 
   for (const file of files) {
     let parsed;
     try {
       parsed = parseFile(file);
     } catch {
+      parseFailures++;
       continue;
     }
     if (!parsed) continue;
@@ -42,6 +44,7 @@ export async function astSearch(
     }
   }
 
+  if (parseFailures === files.length) return 'AST parsing unavailable. Use text_search and read_file; check native tree-sitter installation.';
   if (lines.length === 0) {
     return `No ${queryType} found in ${searchPath}`;
   }

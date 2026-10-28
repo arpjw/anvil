@@ -1,4 +1,4 @@
-import { structuredPatch } from 'diff';
+import { applyPatch, structuredPatch } from 'diff';
 
 export interface DiffHunk {
   header: string;
@@ -32,42 +32,21 @@ export function applySelectedHunks(
   hunks: DiffHunk[],
   acceptedHunkIndices: Set<number>,
 ): string {
-  const origLines = originalContent.split('\n');
-  const resultLines: string[] = [];
-  let origPos = 0;
-
-  for (let i = 0; i < hunks.length; i++) {
-    const hunk = hunks[i];
-    const hunkOrigStart = hunk.oldStart - 1; // convert to 0-indexed
-
-    // Copy lines before this hunk
-    while (origPos < hunkOrigStart) {
-      resultLines.push(origLines[origPos++]);
-    }
-
-    if (acceptedHunkIndices.has(i)) {
-      // Apply the hunk: output '+' lines, skip '-' lines, copy ' ' lines
-      for (const line of hunk.lines) {
-        if (line[0] === '+') {
-          resultLines.push(line.slice(1));
-        } else if (line[0] === '-') {
-          origPos++; // consume original line without emitting
-        } else {
-          resultLines.push(origLines[origPos++]); // context line
-        }
-      }
-    } else {
-      // Reject the hunk: keep original lines
-      for (let j = 0; j < hunk.oldLines; j++) {
-        resultLines.push(origLines[origPos++]);
-      }
+  for (const index of acceptedHunkIndices) {
+    if (!Number.isInteger(index) || index < 0 || index >= hunks.length) {
+      throw new Error(`Invalid hunk index: ${index}`);
     }
   }
-
-  // Copy remaining lines after last hunk
-  while (origPos < origLines.length) {
-    resultLines.push(origLines[origPos++]);
-  }
-
-  return resultLines.join('\n');
+  // Let diff handle empty files, EOF markers, CRLF, and insertion offsets.
+  let offset = 0;
+  const selected = hunks.flatMap((hunk, index) => {
+    if (!acceptedHunkIndices.has(index)) return [];
+    const next = { ...hunk, newStart: hunk.oldStart + offset };
+    offset += hunk.newLines - hunk.oldLines;
+    return [next];
+  });
+  if (selected.length === 0) return originalContent;
+  const result = applyPatch(originalContent, { oldFileName: 'file', newFileName: 'file', oldHeader: '', newHeader: '', hunks: selected });
+  if (result === false) throw new Error('Selected diff no longer applies to the original file.');
+  return result;
 }

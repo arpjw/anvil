@@ -116,7 +116,7 @@ describe('POST /sessions/:id/approve', () => {
     expect(body.error.code).toBe('invalid_state');
   });
 
-  test('transitions reviewing → running (correct)', async () => {
+  test('disconnected runtime cannot approve a plan', async () => {
     const h = createHarness();
     const a = await seed(h, 'clerk_a', 'tok-a');
     const session = await createSession(h, a.user.id, a.repo.id, 'reviewing');
@@ -125,9 +125,8 @@ describe('POST /sessions/:id/approve', () => {
       token: 'tok-a',
       method: 'POST',
     });
-    expect(res.status).toBe(200);
-    const body = await readJson(res);
-    expect(body.session.status).toBe('running');
+    expect(res.status).toBe(409);
+    expect((await h.repo.findSessionById(session.id))?.status).toBe('reviewing');
   });
 });
 

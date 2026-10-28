@@ -22,19 +22,8 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <ClerkProvider
-      appearance={{
-        variables: {
-          colorPrimary: '#fbbf24',
-          colorBackground: '#0a0a0a',
-          colorInputBackground: '#161616',
-          colorText: '#f0f0f0',
-          colorTextSecondary: '#6b7280',
-          colorNeutral: '#f0f0f0',
-        },
-      }}
-    >
+  const configured = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const content = (
       <html
         lang="en"
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
@@ -43,10 +32,10 @@ export default function RootLayout({
           className="min-h-full"
           style={{ backgroundColor: '#0a0a0a', color: '#f0f0f0' }}
         >
-          <Nav />
+          <Nav configured={configured} />
           <div className="pt-[52px] min-h-screen">{children}</div>
         </body>
       </html>
-    </ClerkProvider>
   );
+  return configured ? <ClerkProvider>{content}</ClerkProvider> : content;
 }

@@ -1,179 +1,39 @@
-# Anvil — Architecture
+# Anvil architecture
 
-> The permanent technical reference. Describes what exists, not what is planned.
-> Update this file when a layer is built or a decision is made. Never speculative.
+## Execution path
 
----
+`src/index.ts` parses commands and selects the terminal or headless interface. `src/api.ts` exports the orchestration API for the VM runtime without starting the CLI. There is one active session per process because the event stream and language-server manager are shared.
 
-## Overview
+`runOrchestrator` loads project context, classifies the request, and runs the planner for larger tasks. A plan contains a goal, context, file lists, ordered steps, verification criteria, and risks. Approval can accept, reject, or supply revision feedback. Simple requests use a minimal plan and the same execution and verification lifecycle.
 
-Anvil is a terminal-based AI coding agent written in TypeScript. It replicates the core architectural innovations that make Cursor effective — shadow workspace validation, agentic context retrieval, and a planner/executor subagent split — outside of an IDE, at the filesystem level.
+The executor receives the chosen client, model, and budget. Its file tools are restricted to a nonempty approved file list. It must call `done` and have no unresolved write failures to report completion. That signal ends execution only; the orchestrator still runs project verification and any repair rounds before emitting terminal success.
 
-A user request flows through five layers in sequence:
+## Edit gate
 
-```
-User Request
-     │
-     ▼
-┌─────────────────────┐
-│     Orchestrator    │  main agent loop, global state, todo list
-└────────┬────────────┘
-         │ spawns
-    ┌────┴──────┐
-    ▼           ▼
-┌────────┐  ┌──────────┐
-│Planner │  │ Executor │
-└───┬────┘  └────┬─────┘
-    │             │ writes to shadow first
-    ▼             ▼
-┌──────────────────────┐
-│   Shadow Workspace   │  temp copy → LSP diagnostics → commit or retry
-└──────────┬───────────┘
-           │ tools
-           ▼
-┌──────────────────────┐
-│   Context Engine     │  read_file, list_files, text_search, find_symbol, ast_search
-└──────────────────────┘
-```
+`src/shadow/workspace.ts` stores proposals and logs under `/tmp/anvil/<session-id>/`. TypeScript/JavaScript use an in-memory language-server document view, JSON uses syntax checking, and other formats defer to project validation. LSP frames use UTF-8 byte lengths. Diagnostics are version filtered where the server provides versions; versionless notifications use a settling interval. Missing responses and server failure reject validation.
 
----
+Hunk review applies the selected patch with the `diff` package and revalidates the result. The real document view is restored after the proposal. `commitContent` checks the expected original content and existence, writes a temporary sibling file, then renames it into place. Successful writes have separate audit records containing a SHA-256 digest. Validation alone does not create a committed audit record.
 
-## Layer 1: Orchestrator
+Workspace guards reject file writes outside the repository, symlink escapes, and `.git` edits. These guards apply to file tools, not the general shell tool. This is a document validation gate, not a fully isolated workspace or a multi-file transaction.
 
-The main agent loop. Single instance per session.
+## Verification and persistence
 
-**Responsibilities:**
-- Receive user request
-- Decide: plan-first (complex, multi-file) or execute-directly (simple, single-file)
-- Spawn Planner and Executor subagents
-- Own the todo list — no subagent touches it
-- Hold global session state
-- Present plan to user for approval before execution begins
-- Handle subagent errors and retries at the session level
+`ValidationEngine` reports typecheck, lint, tests, and custom checks independently, including command, duration, status, and skip reason. A nonzero exit remains a failure even when a diagnostic parser cannot understand the output. The verifier builds repair plans for up to two rounds. No discovered checks means skipped verification, not passing verification.
 
-**Tool access:** all tools except file write (delegates writes to Executor)
+Structured session results are atomically saved under `.anvil/sessions/`; conversation and usage records are saved separately. Plans are workspace-bound in temporary storage. Resume rereads the original plan against current files. Completion, failure, and cancellation are distinct events; terminal success is emitted only after execution and verification policy finish.
 
-**State shape:**
-```typescript
-type OrchestratorState = {
-  sessionId: string
-  request: string
-  plan: Plan | null
-  todos: Todo[]
-  status: 'planning' | 'awaiting_approval' | 'executing' | 'done' | 'error'
-}
-```
+When automatic branching is enabled, the starting branch and exact commit are recorded. The tracked worktree must be clean. Files recorded by `write_file` are committed individually after verification, excluding unrelated staged changes. Undo uses the recorded base commit; rollback refuses dirty tracked work and retains the session branch. Edits made directly through shell commands do not have the same file-event accounting and should be reviewed in Git.
 
----
+## Context and tools
 
-## Layer 2: Planner Subagent
+The context layer combines file and text reads, tree-sitter queries, LSP symbol navigation, project rules, conversation history, and semantic search. Semantic indexing uses Voyage when configured and local TF-IDF otherwise. Tree-sitter grammar initialization is lazy and native failures are reported. Command output has bounded retained and streamed buffers; timeouts return failure.
 
-Explores the codebase and produces a structured plan. Spawned by Orchestrator.
+## Cloud path
 
-**Responsibilities:**
-- Explore codebase using read-only context engine tools
-- Identify relevant files, symbols, and dependencies
-- Write a structured plan to `/tmp/anvil/<sessionId>/plan.json`
-- Return plan path to Orchestrator
+The control plane is Bun/Hono with Postgres, Redis, Clerk, and GitHub adapters. It selects the provider key before queuing a session. A VM receives setup instructions, clones the branch, and imports the built library. Git credentials are passed only to the clone process, not embedded in the remote URL. Cloud runs disable local automatic branching; PR creation is an explicit control-plane action after completion and diff review.
 
-**Tool access:** `read_file`, `list_files`, `text_search`, `find_symbol`, `ast_search` — no write access
+Runtime messages are serialized through the event relay. Persistent activity has stable IDs for replay. Ordinary tool warnings do not fail the session; explicit terminal failures do. Plans are persisted independently of the bounded replay window. Repeated edits to a file preserve its initial content, update its final diff, and reset approval. VM absolute paths are normalized before use in GitHub operations.
 
-**Plan format:**
-```typescript
-type Plan = {
-  goal: string
-  context: string                // what the planner found and why it matters
-  filesToModify: string[]
-  filesToCreate: string[]
-  steps: string[]
-  verificationCriteria: string[]
-  risks: string[]
-}
-```
+The dashboard merges replay and live events, bounds the visible history, exposes reconnect failures, and closes terminal streams. It provides plan approval/revision, diff review, status filters, activity search, and a clearly labeled no-services preview at `/demo`.
 
----
-
-## Layer 3: Executor Subagent
-
-Takes an approved plan and applies edits. Spawned by Orchestrator after plan approval.
-
-**Responsibilities:**
-- Read the approved plan
-- Apply edits via the shadow workspace (never directly to real files)
-- Receive diagnostic feedback and self-correct (max 3 passes per file)
-- Commit clean edits to the real filesystem
-- Report results to Orchestrator
-
-**Tool access:** `write_file` (shadow-mediated), `read_file` (scoped to plan files only) — no broad codebase access
-
----
-
-## Layer 4: Shadow Workspace
-
-Validates every edit before it touches the real filesystem.
-
-**Mechanism:**
-1. Executor proposes an edit to a file
-2. Shadow workspace copies the file to `/tmp/anvil/<sessionId>/shadow/<filepath>`
-3. Edit is applied to the shadow copy
-4. Relevant language server is spawned against the shadow copy
-5. Diagnostics are collected (errors, warnings)
-6. If clean → edit commits to real file, shadow copy deleted
-7. If errors → diagnostics returned to Executor for another pass
-8. After 3 failed passes → escalate to Orchestrator
-
-**Supported language servers:**
-- TypeScript: `typescript-language-server`
-- Go: `gopls`
-- Python: `pylsp`
-
-**Session log:** every shadow cycle is logged to `/tmp/anvil/<sessionId>/shadow.log` — proposal, diagnostics, outcome.
-
----
-
-## Layer 5: Context Engine
-
-The retrieval layer. Called by Planner and Orchestrator. Retrieval is agentic — iterative exploration, not one-shot RAG.
-
-**Tools:**
-
-| Tool | Implementation | Description |
-|------|---------------|-------------|
-| `read_file` | fs | Direct file read with optional line range |
-| `list_files` | glob | Directory traversal with pattern matching |
-| `text_search` | ripgrep subprocess | Fast pattern search across codebase |
-| `find_symbol` | LSP `textDocument/definition` + `references` | Where a symbol is defined and used |
-| `ast_search` | tree-sitter | Query by node type (functions, classes, imports) |
-
-**Vector index:** SQLite + sqlite-vec. File chunks embedded at project init, used for semantic search when keyword search is insufficient. Rebuilt on file change.
-
----
-
-## Data Flow: End to End
-
-```
-1. User: "add retry logic to the HTTP client"
-2. Orchestrator: complex request → spawn Planner
-3. Planner: ast_search for HTTP client → find_symbol for request function
-         → text_search for error handling patterns → write plan.json
-4. Orchestrator: present plan to user → user approves
-5. Orchestrator: spawn Executor with plan
-6. Executor: read plan → propose edit to http_client.ts
-7. Shadow Workspace: copy file → apply edit → run tsc --noEmit
-         → 1 type error → return to Executor
-8. Executor: fix type error → re-propose
-9. Shadow Workspace: clean → commit to real file
-10. Executor: report done → Orchestrator: session complete
-```
-
----
-
-## Key Design Decisions
-
-**Why TypeScript:** Cursor's stack is TypeScript. Staying in the same language ecosystem is deliberate alignment with the target audience for this project.
-
-**Why not RAG:** One-shot vector search doesn't handle cross-file dependencies. The Planner uses iterative agentic retrieval — it decides what to look up based on what it finds.
-
-**Why subagent tool isolation:** The Executor has no broad read access. It sees only what the Planner surfaced. This keeps context tight and prevents the Executor from contaminating its own context window with irrelevant code.
-
-**Why shadow workspace at the filesystem level:** Cursor implements this as a hidden VS Code window. Without editor-level access, the equivalent is: temp file + LSP subprocess + diagnostic feedback loop. Same principle, different substrate.
+Cloud phase checkpoints are observational metadata. The legacy `/resume` route now retries from the source branch in a new session and returns `recovery: "fresh_checkout"`; it does not restore a VM snapshot. Tests cover the in-memory service contracts, not production database concurrency, provider behavior, VM isolation, or end-to-end billing.

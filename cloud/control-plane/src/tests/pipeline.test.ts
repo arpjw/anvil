@@ -108,12 +108,12 @@ describe('processEvent', () => {
     expect(reloaded?.durationSeconds).toBeGreaterThanOrEqual(4);
   });
 
-  test('error transitions running → failed', async () => {
+  test('fatal session_error transitions running → failed', async () => {
     const repo = createMemoryRepository();
     const session = await seedSession(repo, 'running');
     const redis = new FakeRedis();
     await processEvent(repo, redis, session.id, {
-      type: 'error',
+      type: 'session_error',
       payload: { message: 'boom' },
     });
     const reloaded = await repo.findSessionById(session.id);

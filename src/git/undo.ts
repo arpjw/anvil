@@ -1,107 +1,31 @@
-import { existsSync, unlinkSync, writeFileSync } from 'fs';
-import { relative, resolve } from 'path';
+import { relative } from 'path';
+import { realpathSync } from 'fs';
 import { simpleGit } from 'simple-git';
-import { appendMemory } from '../context/project.js';
+import { getSessionMetadata, commitFile } from './client.js';
+import { workspacePath } from '../tools/workspace_path.js';
 
-function sessionBranchName(sessionId: string, date?: string): string {
-  // Matches createSessionBranch(): anvil/session-<8chars>-<YYYYMMDD>
-  const short = sessionId.slice(0, 8);
-  if (date) return `anvil/session-${short}-${date}`;
-  return `anvil/session-${short}-*`;
+export async function undoableFiles(workdir: string, sessionId: string): Promise<string[]> {
+  const git = simpleGit(workdir);
+  const meta = getSessionMetadata(workdir, sessionId);
+  const base = meta.baseCommit || (await git.raw(['merge-base', meta.originalBranch, meta.branchName])).trim();
+  const raw = await git.raw(['diff', '--name-only', '-z', base, meta.branchName]);
+  return raw.split('\0').filter(f => f && !f.startsWith('.anvil/'));
 }
 
-async function findSessionBranch(
-  workdir: string,
-  sessionId: string,
-): Promise<string | null> {
+export async function undoFile(workdir: string, filepath: string, sessionId: string): Promise<{ deleted: boolean; commitHash: string }> {
   const git = simpleGit(workdir);
-  const branches = await git.branch(['--list', `anvil/session-${sessionId.slice(0, 8)}-*`]);
-  const match = Object.keys(branches.branches).find((b) =>
-    b.startsWith(`anvil/session-${sessionId.slice(0, 8)}-`),
-  );
-  return match ?? null;
-}
-
-// List every file the session touched (added, modified, deleted).
-export async function undoableFiles(
-  workdir: string,
-  sessionId: string,
-): Promise<string[]> {
-  const git = simpleGit(workdir);
-  const branch = await findSessionBranch(workdir, sessionId);
-  if (!branch) return [];
-  // Compare the session branch tip against its merge-base with main —
-  // that's every file the session actually changed.
-  let base: string;
-  try {
-    base = (await git.raw(['merge-base', branch, 'main'])).trim();
-  } catch {
-    // no main branch — fall back to the parent of the branch's first commit
-    base = (await git.raw(['rev-list', '--max-parents=0', branch])).trim();
+  const meta = getSessionMetadata(workdir, sessionId);
+  if ((await git.revparse(['--abbrev-ref', 'HEAD'])).trim() !== meta.branchName) {
+    throw new Error(`Undo must run on ${meta.branchName}.`);
   }
-  const raw = await git.raw(['diff', '--name-only', `${base}..${branch}`]);
-  return raw
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-// Restore the pre-session content of one file. For files that were CREATED
-// by the session (no pre-session content), delete them.
-export async function undoFile(
-  workdir: string,
-  filepath: string,
-  sessionId: string,
-): Promise<{ deleted: boolean; commitHash: string }> {
-  const git = simpleGit(workdir);
-  const branch = await findSessionBranch(workdir, sessionId);
-  if (!branch) throw new Error(`No session branch found for ${sessionId.slice(0, 8)}`);
-
-  const absPath = resolve(workdir, filepath);
-  const rel = relative(workdir, absPath);
-
-  // Find the merge-base with main. That's the "before session" state.
-  let base: string;
-  try {
-    base = (await git.raw(['merge-base', branch, 'main'])).trim();
-  } catch {
-    base = (await git.raw(['rev-list', '--max-parents=0', branch])).trim();
-  }
-
-  // Ask git whether the file existed at `base`. If it did, restore its content;
-  // if not, the session created it — delete the file.
-  let preContent: string | null = null;
-  try {
-    preContent = await git.raw(['show', `${base}:${rel}`]);
-  } catch {
-    preContent = null; // file didn't exist in the pre-session tree
-  }
-
+  const rel = relative(realpathSync(workdir), workspacePath(workdir, filepath));
+  if (!(await undoableFiles(workdir, sessionId)).includes(rel)) throw new Error('File was not changed by this session.');
+  if ((await git.status()).files.some(f => f.path === rel)) throw new Error('File has uncommitted changes. Commit or stash them before undoing.');
+  const base = meta.baseCommit || (await git.raw(['merge-base', meta.originalBranch, meta.branchName])).trim();
   let deleted = false;
-  if (preContent === null) {
-    if (existsSync(absPath)) unlinkSync(absPath);
-    deleted = true;
-  } else {
-    writeFileSync(absPath, preContent, 'utf-8');
-  }
-
-  const msg = deleted
-    ? `revert: remove ${rel} (created by session ${sessionId.slice(0, 8)})`
-    : `revert: undo ${rel} from session ${sessionId.slice(0, 8)}`;
-
-  await git.add([absPath]).catch(async () => {
-    // For deletes, `git add` on a missing path errors — use --all to record removal.
-    await git.raw(['add', '--all', rel]);
-  });
-  const commit = await git.commit(msg, ['--allow-empty']);
-  const hash = commit.commit;
-
-  try {
-    appendMemory(workdir, sessionId, `Undid changes to ${rel} from session ${sessionId.slice(0, 8)}`);
-  } catch { /* non-fatal */ }
-
-  // Silence linter for the alias helper that other modules may want later.
-  void sessionBranchName;
-
-  return { deleted, commitHash: hash };
+  try { await git.raw(['cat-file', '-e', `${base}:${rel}`]); } catch { deleted = true; }
+  if (deleted) await git.raw(['rm', '--', rel]);
+  else await git.raw(['restore', `--source=${base}`, '--worktree', '--', rel]);
+  const commitHash = await commitFile(workdir, rel, `revert: undo ${rel} from session ${sessionId.slice(0, 8)}`);
+  return { deleted, commitHash };
 }

@@ -32,7 +32,7 @@ function detectRunner(workdir: string): Detected | null {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { scripts?: { test?: string } };
       const script = pkg.scripts?.test ?? '';
       if (script && !script.startsWith('echo')) {
-        return { runner: 'npm', command: script };
+        return { runner: detectParserFromCommand(script), command: 'npm test --' };
       }
     } catch { /* ignore */ }
   }
@@ -40,13 +40,13 @@ function detectRunner(workdir: string): Detected | null {
   // 2. jest.config.*
   const jestFiles = ['jest.config.js', 'jest.config.ts', 'jest.config.mjs', 'jest.config.cjs', 'jest.config.json'];
   if (jestFiles.some(f => existsSync(join(workdir, f)))) {
-    return { runner: 'jest', command: 'npx jest' };
+    return { runner: 'jest', command: 'npx --no-install jest' };
   }
 
   // 3. vitest.config.*
   const vitestFiles = ['vitest.config.js', 'vitest.config.ts', 'vitest.config.mjs'];
   if (vitestFiles.some(f => existsSync(join(workdir, f)))) {
-    return { runner: 'vitest', command: 'npx vitest run' };
+    return { runner: 'vitest', command: 'npx --no-install vitest run' };
   }
 
   // 4. pytest
@@ -83,12 +83,13 @@ function detectParserFromCommand(command: string): string {
 }
 
 function applyFilter(command: string, runner: string, filter: string): string {
+  filter = "'" + filter.replace(/'/g, "'\"'\"'") + "'";
   switch (runner) {
     case 'vitest': return `${command} ${filter}`;
-    case 'jest':   return `${command} --testPathPattern="${filter}"`;
-    case 'pytest': return `${command} -k "${filter}"`;
+    case 'jest':   return `${command} --testPathPattern=${filter}`;
+    case 'pytest': return `${command} -k ${filter}`;
     case 'cargo':  return `${command} ${filter}`;
-    case 'go':     return `${command} -run "${filter}"`;
+    case 'go':     return `${command} -run ${filter}`;
     default:       return `${command} ${filter}`;
   }
 }
@@ -176,7 +177,7 @@ function parseOutput(
   return { totalTests, passedTests, failedTests, skippedTests, failingTests };
 }
 
-export async function runTests(workdir: string, filter?: string): Promise<RunTestsResult> {
+export async function runTests(workdir: string, filter?: string, run: typeof runCommand = runCommand): Promise<RunTestsResult> {
   const detected = detectRunner(workdir);
 
   if (!detected) {
@@ -196,14 +197,14 @@ export async function runTests(workdir: string, filter?: string): Promise<RunTes
   const { runner } = detected;
 
   if (filter) {
-    const parseRunner = detectParserFromCommand(command);
+    const parseRunner = runner === 'npm' ? detectParserFromCommand(command) : runner;
     command = applyFilter(command, parseRunner, filter);
   }
 
-  const cmdResult = await runCommand(command, workdir, 120);
+  const cmdResult = await run(command, workdir, 120);
   const rawOutput = [cmdResult.stdout, cmdResult.stderr].filter(Boolean).join('\n');
 
-  const parseRunner = detectParserFromCommand(command);
+  const parseRunner = runner === 'npm' ? detectParserFromCommand(command) : runner;
   const parsed = parseOutput(rawOutput, parseRunner);
   const passed = cmdResult.exitCode === 0;
 

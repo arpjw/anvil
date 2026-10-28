@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { SignedIn, SignedOut, SignInButton } from '@clerk/nextjs';
 import { SessionList } from './_components/SessionList';
 import { WaitlistForm } from './_components/WaitlistForm';
@@ -5,6 +6,7 @@ import { WaitlistForm } from './_components/WaitlistForm';
 export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return <div className="workspace-empty" style={{ minHeight: '85vh', padding: 40 }}><span className="eyebrow">ANVIL / WORKSPACE PREVIEW</span><h1 style={{ fontSize: 42, maxWidth: 650, letterSpacing: '-.04em' }}>From a clear plan to a change you can trust.</h1><p style={{ maxWidth: 500, lineHeight: 1.8 }}>Explore the session workspace, inspect a plan, and review file changes. The preview uses sample data and needs no API keys.</p><Link href="/demo" className="button-primary">Explore the workspace ↗</Link><p className="sidebar-note">Configure Clerk and the control plane to connect real repositories.</p></div>;
   return (
     <>
       <SignedOut>

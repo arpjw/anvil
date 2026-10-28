@@ -7,53 +7,46 @@ import { runAgent } from './agent.js';
 import { App } from './ui/App.js';
 import { uiStream } from './ui/stream.js';
 
-// ── Argument parsing ───────────────────────────────────────────────────────────
-
-const argv = process.argv.slice(2);
-const isHeadless    = argv.includes('--headless');
-const isDryRun      = argv.includes('--dry-run');
-const noVerify      = argv.includes('--no-verify');
-const isRollback    = argv[0] === '--rollback';
-const isResume      = argv[0] === '--resume';
-const showCommands  = argv.includes('--commands');
-const showVersion   = argv.includes('--version') || argv[0] === '-V';
-const continueConv  = argv.includes('--continue');
-const noOpen        = argv.includes('--no-open');
-
-// Extract --budget <dollars>
-let budgetCapUSD: number | null = null;
-const budgetIdx = argv.indexOf('--budget');
-if (budgetIdx !== -1 && argv[budgetIdx + 1] && !argv[budgetIdx + 1].startsWith('--')) {
-  const parsed = Number(argv[budgetIdx + 1]);
-  if (Number.isFinite(parsed) && parsed > 0) budgetCapUSD = parsed;
-}
-
-// Extract --image <filepath>
-let imagePath: string | null = null;
-const imageIdx = argv.indexOf('--image');
-if (imageIdx !== -1 && argv[imageIdx + 1] && !argv[imageIdx + 1].startsWith('--')) {
-  imagePath = argv[imageIdx + 1];
-}
-
-// Extract --model <id>
-let modelFlag: string | null = null;
-const modelIdx = argv.indexOf('--model');
-if (modelIdx !== -1 && argv[modelIdx + 1] && !argv[modelIdx + 1].startsWith('--')) {
-  modelFlag = argv[modelIdx + 1];
-}
-
-// Strip flags (and their values) to leave clean positional args
-const positional = argv.filter((a, i) => {
-  if (a.startsWith('--')) return false;
-  if (i > 0 && argv[i - 1] === '--image') return false;
-  if (i > 0 && argv[i - 1] === '--model') return false;
-  if (i > 0 && argv[i - 1] === '--budget') return false;
-  return true;
-});
-
-// ── Main ──────────────────────────────────────────────────────────────────────
+import { HELP, parseCli } from './setup/cli.js';
 
 async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const { values, positionals, budget: budgetCapUSD } = parseCli(argv);
+  const positional = [...positionals];
+  const isHeadless = !!(values.headless || values['stream-json']);
+  const isDryRun = !!values['dry-run'];
+  const noVerify = values['no-verify'];
+  const isRollback = !!values.rollback;
+  const isResume = !!values.resume;
+  const showCommands = !!values.commands;
+  const showVersion = !!values.version;
+  const continueConv = !!values.continue;
+  const noOpen = !!values['no-open'];
+  const imagePath = values.image;
+  const modelFlag = values.model;
+  if (values.rollback) positional.unshift(values.rollback);
+  if (values.resume) positional.unshift(values.resume);
+  if (values.help || (!positional.length && !showVersion && !showCommands)) {
+    console.log(HELP);
+    return;
+  }
+
+  if (positional[0] === 'verify') {
+    const { ValidationEngine } = await import('./services/validation/index.js');
+    const engine = new ValidationEngine();
+    await engine.start();
+    try {
+      const report = await engine.validate({ workdir: resolve(positional[1] ?? process.cwd()) });
+      if (values.json) console.log(JSON.stringify(report, null, 2));
+      else {
+        for (const check of report.checks) console.log(`${check.status.toUpperCase().padEnd(7)} ${check.phase.padEnd(10)} ${check.durationMs}ms${check.reason ? ` (${check.reason})` : ''}`);
+        for (const error of report.errors) console.error(`[${error.phase}] ${error.file}${error.line ? `:${error.line}` : ''} ${error.message}`);
+        console.log(report.checks.every(c => c.status === 'skipped') ? 'No project checks detected.' : report.passed ? 'All detected checks passed.' : 'Project checks failed.');
+      }
+      process.exitCode = report.passed ? 0 : 1;
+    } finally { await engine.stop(); }
+    return;
+  }
 
   // ── --version ────────────────────────────────────────────────────────────────
   if (showVersion) {
@@ -75,7 +68,7 @@ async function main(): Promise<void> {
   if (positional[0] === 'doctor') {
     const workdir = resolve(positional[1] ?? process.cwd());
     const { runDoctor } = await import('./setup/doctor.js');
-    const exitCode = await runDoctor(workdir);
+    const exitCode = await runDoctor(workdir, modelFlag);
     process.exit(exitCode);
   }
 
@@ -92,12 +85,13 @@ async function main(): Promise<void> {
         console.error(`Session ${sessionId.slice(0, 8)} not found in ${workdir}`);
         process.exit(1);
       }
-      console.log(formatSessionDetail(detail));
+      console.log(values.json ? JSON.stringify(detail, null, 2) : formatSessionDetail(detail));
       return;
     }
 
     const workdir = resolve(positional[1] ?? process.cwd());
     const records = listHistory(workdir);
+    if (values.json) { console.log(JSON.stringify(records, null, 2)); return; }
     if (records.length === 0) {
       console.log(`No sessions found in ${workdir}`);
       return;
@@ -132,12 +126,8 @@ async function main(): Promise<void> {
     const { simpleGit } = await import('simple-git');
     const git = simpleGit(workdir);
     // Find the most recent session branch to derive the session id from.
-    const branches = await git.branch(['--list', 'anvil/session-*']);
-    const sessionBranch = Object.keys(branches.branches)
-      .filter((b) => b.startsWith('anvil/session-'))
-      .sort()
-      .pop();
-    if (!sessionBranch) {
+    const sessionBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+    if (!sessionBranch.startsWith('anvil/session-')) {
       console.error('No anvil session branch found in this repo.');
       process.exit(1);
     }
@@ -253,9 +243,11 @@ async function main(): Promise<void> {
     }
     const workdir = resolve(positional[1] ?? process.cwd());
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('Error: ANTHROPIC_API_KEY environment variable is not set');
-      process.exit(1);
+    if (isHeadless) {
+      const { runHeadless } = await import('./execution/headless.js');
+      const result = await runHeadless('', workdir, noVerify, undefined, modelFlag, { resumeId: sessionId, budgetCapUSD, streamJson: values['stream-json'] });
+      console.log(JSON.stringify(values['stream-json'] ? { type: 'result', ...result } : result));
+      process.exit(result.success ? 0 : 1);
     }
 
     const { unmount } = render(
@@ -268,10 +260,11 @@ async function main(): Promise<void> {
 
     const { resumeSession } = await import('./execution/resume.js');
     try {
-      await resumeSession(sessionId, workdir);
-      uiStream.ensureDone('Session resumed and completed.');
+      const result = await resumeSession(sessionId, workdir, { noVerify, noOpen, modelId: modelFlag, budgetCapUSD });
+      process.exitCode = result.status === 'complete' ? 0 : 1;
       await new Promise(r => setTimeout(r, 500));
       unmount();
+      process.exit(process.exitCode ?? 0);
     } catch (err) {
       uiStream.push({ type: 'error', message: (err as Error).message });
       await new Promise(r => setTimeout(r, 500));
@@ -292,37 +285,6 @@ async function main(): Promise<void> {
 
   // ── Help ─────────────────────────────────────────────────────────────────────
   const request = positional[0];
-
-  if (!request || request === '--help' || request === '-h') {
-    console.error('Usage: anvil "<request>" [workdir] [flags]');
-    console.error('       workdir defaults to the current directory');
-    console.error('\nExample: anvil "add error handling to main.ts"');
-    console.error('\nCommands:');
-    console.error('  anvil init                   Interactive project setup');
-    console.error('  anvil doctor                 Verify Anvil setup');
-    console.error('  anvil config list            Show all config values');
-    console.error('  anvil config set <key> <v>   Set a config value');
-    console.error('  anvil config get <key>       Get a config value');
-    console.error('  anvil history [workdir]      List past sessions in a workdir');
-    console.error('  anvil history <id> [workdir] Show full detail for one session');
-    console.error('  anvil undo <file> [workdir]  Revert one file from the latest session');
-    console.error('  anvil memory summarize [wd]  Collapse memory.md older entries');
-    console.error('\nFlags:');
-    console.error('  --model <id>             Select model (skips picker)');
-    console.error('  --rollback <sessionId>   Revert all changes from a session');
-    console.error('  --resume <sessionId>     Resume a previously interrupted session');
-    console.error('  --image <filepath>       Attach an image as context (PNG/JPG/WebP/GIF)');
-    console.error('  --headless               No TUI — output JSON result to stdout');
-    console.error('  --dry-run                Plan only — print plan, do not execute');
-    console.error('  --no-verify              Skip post-execution verification pass');
-    console.error('  --commands               List available slash commands');
-    console.error('  --continue               Continue the prior conversation in this workdir');
-    console.error('  --budget <dollars>       Abort the session if estimated cost exceeds this');
-    console.error('  --no-open                Do not spawn $EDITOR after the session completes');
-    console.error('  --version                Print the installed anvil-agent version');
-    console.error('\nEnv: API key for the selected model must be set');
-    process.exit(1);
-  }
 
   const workdirArg = positional[1];
   const workdir    = resolve(workdirArg ?? process.cwd());
@@ -380,7 +342,8 @@ async function main(): Promise<void> {
     const { loadConfig } = await import('./setup/config.js');
     const cfg = loadConfig();
     const spec = AVAILABLE_MODELS.find(m => m.id === cfg.model) ?? AVAILABLE_MODELS[0];
-    apiKey = process.env[spec.envKey] ?? process.env.ANTHROPIC_API_KEY ?? '';
+    apiKey = process.env[spec.envKey] ?? (spec.envKey === 'ANTHROPIC_API_KEY' ? cfg.apiKey ?? '' : '');
+    if (!apiKey) throw new Error(`${spec.envKey} is not set for ${spec.id}.`);
     modelId = spec.id;
     modelLabel = spec.label;
     baseURL = spec.baseURL;
@@ -410,12 +373,12 @@ async function main(): Promise<void> {
   }
 
   // ── Headless mode ─────────────────────────────────────────────────────────────
-  if (isHeadless) {
+  if (isHeadless && !isDryRun) {
     const { runHeadless } = await import('./execution/headless.js');
     try {
-      const result = await runHeadless(resolvedRequest, workdir, noVerify, client, modelId);
-      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-      process.exit(result.success && result.verificationPassed ? 0 : 1);
+      const result = await runHeadless(resolvedRequest, workdir, noVerify, client, modelId, { image: imageBlock, systemPrompt, continueConversation: continueConv, budgetCapUSD, streamJson: values['stream-json'] });
+      process.stdout.write(JSON.stringify(values['stream-json'] ? { type: 'result', ...result } : result, null, values['stream-json'] ? undefined : 2) + '\n');
+      process.exit(result.success ? 0 : 1);
     } catch (err) {
       const msg = (err as Error).message;
       process.stdout.write(JSON.stringify({ success: false, error: msg }, null, 2) + '\n');
@@ -429,7 +392,8 @@ async function main(): Promise<void> {
     const { runDryRun } = await import('./agents/orchestrator.js');
     const { checkEditSize } = await import('./execution/guard.js');
     try {
-      const plan = await runDryRun(resolvedRequest, workdir, sessionId);
+      const plan = await runDryRun(resolvedRequest, workdir, sessionId, { client, modelId, systemPrompt, image: imageBlock, budgetCapUSD });
+      if (values.json || isHeadless) { console.log(JSON.stringify(plan, null, 2)); process.exit(0); }
       console.log('=== DRY RUN — NO FILES TOUCHED ===\n');
       console.log(`Goal: ${plan.goal}`);
       if (plan.context) console.log(`\nContext:\n  ${plan.context}`);
@@ -467,7 +431,7 @@ async function main(): Promise<void> {
   );
 
   try {
-    await runAgent(resolvedRequest, workdir, sessionId, {
+    const result = await runAgent(resolvedRequest, workdir, sessionId, {
       noVerify,
       image: imageBlock,
       systemPrompt,
@@ -478,10 +442,9 @@ async function main(): Promise<void> {
       budgetCapUSD,
       noOpen,
     });
-    uiStream.ensureDone();
     await new Promise(r => setTimeout(r, 500));
     unmount();
-    process.exit(0);
+    process.exit(result.status === 'complete' ? 0 : 1);
   } catch (err: unknown) {
     uiStream.push({ type: 'error', message: (err as Error).message });
     await new Promise(r => setTimeout(r, 500));
